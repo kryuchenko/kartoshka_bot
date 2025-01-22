@@ -1,4 +1,3 @@
-# karoshka_bot.py
 import asyncio
 import logging
 import os
@@ -50,31 +49,31 @@ async def main():
 
     # /start — запрос, как публиковать
     @dp.message(Command("start"))
-    async def cmd_start(message: Message):\
-        kb = [
-        [
-            types.KeyboardButton(text="user"),
-            types.KeyboardButton(text="potato")
-        ],
-    ]
-    keyboard = types.ReplyKeyboardMarkup(
-        keyboard=kb,
-        resize_keyboard=True,
-        input_field_placeholder="Выберите способ публикации мема"
-    )
-        await message.answer("Привет! Я бот «{BOT_NAME}».\n\nКак вы хотите опубликовать мем?\n- user   => от своего имени\n- potato => от имени картошки", reply_markup=keyboard
+    async def cmd_start(message: Message):
+        keyboard = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="Публиковать от своего имени", callback_data="choice_user")],
+                [InlineKeyboardButton(text="Публиковать от имени картошки", callback_data="choice_potato")]
+            ]
+        )
+        await message.answer(
+            f"Привет! Я бот «{BOT_NAME}».\n\nКак вы хотите опубликовать мем?",
+            reply_markup=keyboard
+        )
 
-    # Если пользователь напишет "user"
-    @dp.message(F.text == "user")
-    async def set_user_choice(message: Message):
-        user_publish_choice[message.from_user.id] = "user"
-        await message.answer("Буду публиковать от вашего имени. Пришлите мем (текст/фото).")
+    # Обработка выбора кнопок "user" или "potato"
+    @dp.callback_query(F.data.in_({"choice_user", "choice_potato"}))
+    async def handle_choice(callback: CallbackQuery):
+        user_id = callback.from_user.id
 
-    # Если пользователь напишет "potato"
-    @dp.message(F.text == "potato")
-    async def set_potato_choice(message: Message):
-        user_publish_choice[message.from_user.id] = "potato"
-        await message.answer("Буду публиковать от имени картошки. Пришлите мем (текст/фото).")
+        if callback.data == "choice_user":
+            user_publish_choice[user_id] = "user"
+            await callback.message.answer("Буду публиковать от вашего имени. Пришлите мем (текст/фото).")
+        else:
+            user_publish_choice[user_id] = "potato"
+            await callback.message.answer("Буду публиковать от имени картошки. Пришлите мем (текст/фото).")
+
+        await callback.answer()
 
     # Принимаем фото или текст (для простоты - всё в одном хендлере)
     @dp.message(F.content_type.in_({"text", "photo"}))
@@ -83,7 +82,7 @@ async def main():
 
         # Если не выбрали "user" или "potato"
         if user_id not in user_publish_choice:
-            await message.answer("Сначала введите 'user' или 'potato'.")
+            await message.answer("Сначала выберите способ публикации с помощью команд /start.")
             return
 
         global meme_counter
@@ -151,7 +150,6 @@ async def main():
             try:
                 if original_message.photo:
                     largest_photo = original_message.photo[-1].file_id
-                    # Если user => упоминаем автора, иначе => анонимная картошка
                     cap = (
                         f"Мем от @{original_message.from_user.username or user_id}"
                         if choice == "user"
@@ -159,7 +157,6 @@ async def main():
                     )
                     await bot.send_photo(PUBLISH_CHAT_ID, photo=largest_photo, caption=cap)
                 else:
-                    # Текстовый мем
                     txt = (
                         f"Мем от @{original_message.from_user.username or user_id}:\n\n{original_message.text}"
                         if choice == "user"
@@ -167,23 +164,18 @@ async def main():
                     )
                     await bot.send_message(PUBLISH_CHAT_ID, txt)
 
-                # Уведомляем автора
                 await bot.send_message(user_id, "Ваш мем одобрен и опубликован!")
-                # Уведомляем редактора
                 await callback.message.answer(f"Мем (ID {meme_id}) одобрен.")
             except Exception as e:
                 logging.error(f"Ошибка при публикации: {e}")
                 await callback.message.answer(f"Не удалось опубликовать мем {meme_id}. Ошибка: {e}")
         else:
-            # Отклоняем
             await bot.send_message(user_id, "Ваш мем отклонён редактором.")
             await callback.message.answer(f"Мем (ID {meme_id}) отклонён.")
 
-        # Удаляем из памяти
         del pending_memes[meme_id]
         await callback.answer()
 
-    # Запускаем бота (polling)
     await dp.start_polling(bot)
 
 

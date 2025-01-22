@@ -50,14 +50,19 @@ async def main():
 
     # /start — запрос, как публиковать
     @dp.message(Command("start"))
-    async def cmd_start(message: Message):
-        await message.answer(
-            f"Привет! Я бот «{BOT_NAME}».\n\n"
-            "Как вы хотите опубликовать мем?\n"
-            "Введите (без кавычек):\n"
-            " - user   => от своего имени\n"
-            " - potato => от имени картошки"
-        )
+    async def cmd_start(message: Message):\
+        kb = [
+        [
+            types.KeyboardButton(text="user"),
+            types.KeyboardButton(text="potato")
+        ],
+    ]
+    keyboard = types.ReplyKeyboardMarkup(
+        keyboard=kb,
+        resize_keyboard=True,
+        input_field_placeholder="Выберите способ публикации мема"
+    )
+        await message.answer("Привет! Я бот «{BOT_NAME}».\n\nКак вы хотите опубликовать мем?\n- user   => от своего имени\n- potato => от имени картошки", reply_markup=keyboard
 
     # Если пользователь напишет "user"
     @dp.message(F.text == "user")

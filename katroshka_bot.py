@@ -52,12 +52,12 @@ async def main():
     async def cmd_start(message: Message):
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Публиковать от своего имени", callback_data="choice_user")],
-                [InlineKeyboardButton(text="Публиковать от имени картошки", callback_data="choice_potato")]
+                [InlineKeyboardButton(text="👤 Публиковать от своего имени", callback_data="choice_user")],
+                [InlineKeyboardButton(text="🥔 Публиковать от имени картошки", callback_data="choice_potato")]
             ]
         )
         await message.answer(
-            f"Привет! Я бот «{BOT_NAME}».\n\nКак вы хотите опубликовать мем?",
+            f"Привет! Я бот «{BOT_NAME}».\nКак вы хотите опубликовать мем?",
             reply_markup=keyboard
         )
 
@@ -97,8 +97,8 @@ async def main():
         }
 
         # Кнопки "Одобрить"/"Отклонить" для редактора
-        approve_button = InlineKeyboardButton(text="Одобрить", callback_data=f"approve_{meme_id}")
-        reject_button = InlineKeyboardButton(text="Отклонить", callback_data=f"reject_{meme_id}")
+        approve_button = InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_{meme_id}")
+        reject_button = InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{meme_id}")
         keyboard_for_editor = InlineKeyboardMarkup(inline_keyboard=[[approve_button, reject_button]])
 
         # Отправляем редактору(ам) на модерацию

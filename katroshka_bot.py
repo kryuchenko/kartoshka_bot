@@ -26,6 +26,9 @@ required_env_vars = {
     "PUBLISH_CHAT_ID": PUBLISH_CHAT_ID,
     "BOT_NAME": BOT_NAME,
 }
+missing_vars = [k for k, v in required_env_vars.items() if not v]
+if missing_vars:
+    raise ValueError(f"Отсутствуют обязательные переменные окружения: {missing_vars}")
 
 # Преобразуем EDITOR_IDS_STR в список int
 EDITOR_IDS = [int(x.strip()) for x in EDITOR_IDS_STR.split(",")]
@@ -37,7 +40,7 @@ PUBLISH_CHAT_ID = int(PUBLISH_CHAT_ID)
 # ГЛОБАЛЬНЫЕ СТРУКТУРЫ ДАННЫХ
 # ----------------------------
 user_publish_choice = {}  # user_id -> "user" или "potato"
-pending_memes = {}  # meme_id -> {...}
+pending_memes = {}        # meme_id -> {...}
 
 # Глобальный счётчик для ID мемов
 meme_counter = 0
@@ -53,7 +56,7 @@ async def main():
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
                 [InlineKeyboardButton(text="👤 Публиковать от своего имени", callback_data="choice_user")],
-                [InlineKeyboardButton(text="🥔 Публиковать от имени картошки", callback_data="choice_potato")]
+                [InlineKeyboardButton(text="🥔 Публиковать анонимно (от \"картошки\")", callback_data="choice_potato")]
             ]
         )
         await message.answer(
@@ -68,10 +71,14 @@ async def main():
 
         if callback.data == "choice_user":
             user_publish_choice[user_id] = "user"
-            await callback.message.answer("Буду публиковать от вашего имени. Пришлите мем (текст/фото).")
+            await callback.message.answer(
+                "Буду публиковать от вашего имени. Пришлите мем (текст/фото)."
+            )
         else:
             user_publish_choice[user_id] = "potato"
-            await callback.message.answer("Буду публиковать от имени картошки. Пришлите мем (текст/фото).")
+            await callback.message.answer(
+                "Буду публиковать анонимно (от имени «картошки»). Пришлите мем (текст/фото)."
+            )
 
         await callback.answer()
 
@@ -80,9 +87,9 @@ async def main():
     async def handle_meme_suggestion(message: Message):
         user_id = message.from_user.id
 
-        # Если не выбрали "user" или "potato"
+        # Если не выбрали "user" или "potato" — просим сначала сделать выбор
         if user_id not in user_publish_choice:
-            await message.answer("Сначала выберите способ публикации с помощью команд /start.")
+            await message.answer("Сначала выберите способ публикации с помощью команды /start.")
             return
 
         global meme_counter
@@ -101,7 +108,14 @@ async def main():
         reject_button = InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{meme_id}")
         keyboard_for_editor = InlineKeyboardMarkup(inline_keyboard=[[approve_button, reject_button]])
 
-        # Отправляем редактору(ам) на модерацию
+        # Формируем фразу "От ..." для редактора
+        if user_publish_choice[user_id] == "user":
+            from_text = f"От @{message.from_user.username or message.from_user.id}"
+        else:
+            # Анонимный вариант
+            from_text = "От Анонимного пользователя"
+
+        # Отправляем редакторам на модерацию
         for editor_id in EDITOR_IDS:
             if message.photo:
                 largest_photo = message.photo[-1].file_id
@@ -110,7 +124,7 @@ async def main():
                     photo=largest_photo,
                     caption=(
                         f"Мем ID: {meme_id}\n"
-                        f"От @{message.from_user.username or message.from_user.id}\n"
+                        f"{from_text}\n"  # не раскрываем ID, если аноним
                         f"Публикация как: {user_publish_choice[user_id]}"
                     ),
                     reply_markup=keyboard_for_editor
@@ -122,7 +136,7 @@ async def main():
                     text=(
                         f"Мем ID: {meme_id}\n\n"
                         f"{message.text}\n\n"
-                        f"От @{message.from_user.username or message.from_user.id}\n"
+                        f"{from_text}\n"
                         f"Публикация как: {user_publish_choice[user_id]}"
                     ),
                     reply_markup=keyboard_for_editor
@@ -130,10 +144,10 @@ async def main():
 
         await message.answer("Ваш мем отправлен на модерацию.")
 
-    # Обработка нажатия кнопок "Одобрить"/"Отклонить"
+    # Обработка нажатия кнопок "Одобрить"/"Отклонить" редактором
     @dp.callback_query(F.data.startswith(("approve_", "reject_")))
     async def editor_callback(callback: CallbackQuery):
-        data = callback.data  # напр. "approve_5"
+        data = callback.data  # например, "approve_5"
         action, meme_id_str = data.split("_")
         meme_id = int(meme_id_str)
 
@@ -148,31 +162,43 @@ async def main():
 
         if action == "approve":
             try:
+                # Если это фото
                 if original_message.photo:
                     largest_photo = original_message.photo[-1].file_id
-                    cap = (
+                    caption_text = (
                         f"Мем от @{original_message.from_user.username or user_id}"
                         if choice == "user"
                         else "Мем от Анонимной Аллюминиевой Картошки"
                     )
-                    await bot.send_photo(PUBLISH_CHAT_ID, photo=largest_photo, caption=cap)
+                    await bot.send_photo(
+                        chat_id=PUBLISH_CHAT_ID,
+                        photo=largest_photo,
+                        caption=caption_text
+                    )
                 else:
-                    txt = (
+                    # Текст
+                    text_for_channel = (
                         f"Мем от @{original_message.from_user.username or user_id}:\n\n{original_message.text}"
                         if choice == "user"
                         else f"Мем от Анонимной Аллюминиевой Картошки:\n\n{original_message.text}"
                     )
-                    await bot.send_message(PUBLISH_CHAT_ID, txt)
+                    await bot.send_message(
+                        chat_id=PUBLISH_CHAT_ID,
+                        text=text_for_channel
+                    )
 
+                # Уведомление автору (мы-то знаем его user_id внутри бота)
                 await bot.send_message(user_id, "Ваш мем одобрен и опубликован!")
-                await callback.message.answer(f"Мем (ID {meme_id}) одобрен.")
+                await callback.message.answer(f"Мем (ID {meme_id}) одобрен и опубликован.")
             except Exception as e:
                 logging.error(f"Ошибка при публикации: {e}")
                 await callback.message.answer(f"Не удалось опубликовать мем {meme_id}. Ошибка: {e}")
         else:
+            # Отклонение
             await bot.send_message(user_id, "Ваш мем отклонён редактором.")
             await callback.message.answer(f"Мем (ID {meme_id}) отклонён.")
 
+        # Удаляем из списка на модерацию
         del pending_memes[meme_id]
         await callback.answer()
 

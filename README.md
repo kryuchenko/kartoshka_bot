@@ -113,6 +113,11 @@ python3 karoshka_bot.py
 # Нажмите Ctrl+B, затем D
 ```
 
+Чтобы обновить код и перезапустить бота одной командой:
+```bash
+git pull && tmux kill-session -t karoshka_bot && tmux new-session -d -s karoshka_bot "python3 karoshka_bot.py"
+```
+
 Чтобы вернуться к сессии бота:
 ```bash
 tmux attach -t karoshka_bot

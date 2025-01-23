@@ -55,8 +55,18 @@ async def main():
     async def cmd_start(message: Message):
         keyboard = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="👤 Публиковать от своего имени", callback_data="choice_user")],
-                [InlineKeyboardButton(text="🥔 Публиковать анонимно (от \"картошки\")", callback_data="choice_potato")]
+                [
+                    InlineKeyboardButton(
+                        text="👤 Публиковать от своего имени",
+                        callback_data="choice_user"
+                    )
+                ],
+                [
+                    InlineKeyboardButton(
+                        text="🥔 Публиковать анонимно (от \"картошки\")",
+                        callback_data="choice_potato"
+                    )
+                ]
             ]
         )
         await message.answer(
@@ -72,31 +82,33 @@ async def main():
         if callback.data == "choice_user":
             user_publish_choice[user_id] = "user"
             await callback.message.answer(
-                "Буду публиковать от вашего имени. Пришлите мем (текст/фото)."
+                "Буду публиковать от вашего имени. Пришлите мем (текст/фото/видео)."
             )
         else:
             user_publish_choice[user_id] = "potato"
             await callback.message.answer(
-                "Буду публиковать анонимно (от имени «картошки»). Пришлите мем (текст/фото)."
+                "Буду публиковать анонимно (от имени «картошки»). Пришлите мем (текст/фото/видео)."
             )
 
         await callback.answer()
 
-    # Принимаем фото или текст (для простоты - всё в одном хендлере)
-    @dp.message(F.content_type.in_({"text", "photo"}))
+    # Принимаем фото, видео или текст (в одном хендлере)
+    @dp.message(F.content_type.in_({"text", "photo", "video"}))
     async def handle_meme_suggestion(message: Message):
         user_id = message.from_user.id
 
         # Если не выбрали "user" или "potato" — просим сначала сделать выбор
         if user_id not in user_publish_choice:
-            await message.answer("Сначала выберите способ публикации с помощью команды /start.")
+            await message.answer(
+                "Сначала выберите способ публикации с помощью команды /start."
+            )
             return
 
         global meme_counter
         meme_counter += 1
         meme_id = meme_counter
 
-        # Сохраняем данные во временную структуру
+        # Сохраним оригинал сообщения, чтобы при модерации знать что было
         pending_memes[meme_id] = {
             "user_id": user_id,
             "publish_choice": user_publish_choice[user_id],
@@ -104,38 +116,66 @@ async def main():
         }
 
         # Кнопки "Одобрить"/"Отклонить" для редактора
-        approve_button = InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_{meme_id}")
-        reject_button = InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{meme_id}")
-        keyboard_for_editor = InlineKeyboardMarkup(inline_keyboard=[[approve_button, reject_button]])
+        approve_button = InlineKeyboardButton(
+            text="✅ Одобрить",
+            callback_data=f"approve_{meme_id}"
+        )
+        reject_button = InlineKeyboardButton(
+            text="❌ Отклонить",
+            callback_data=f"reject_{meme_id}"
+        )
+        keyboard_for_editor = InlineKeyboardMarkup(
+            inline_keyboard=[[approve_button, reject_button]]
+        )
 
-        # Формируем фразу "От ..." для редактора
+        # Определяем, как отобразить имя отправителя
         if user_publish_choice[user_id] == "user":
             from_text = f"От @{message.from_user.username or message.from_user.id}"
         else:
-            # Анонимный вариант
             from_text = "От Анонимного пользователя"
 
-        # Отправляем редакторам на модерацию
+        # Формируем текст для редактора
+        # Если пользователь прислал подпись (caption) к фото/видео — берём её,
+        # иначе берём message.text для текстовых сообщений
+        user_text = message.caption if message.caption else message.text
+
+        # Рассылаем всем редакторам для одобрения
         for editor_id in EDITOR_IDS:
             if message.photo:
-                largest_photo = message.photo[-1].file_id
+                # Фото
+                largest_photo_id = message.photo[-1].file_id
                 await bot.send_photo(
                     chat_id=editor_id,
-                    photo=largest_photo,
+                    photo=largest_photo_id,
                     caption=(
-                        f"Мем ID: {meme_id}\n"
-                        f"{from_text}\n"  # не раскрываем ID, если аноним
+                        f"Мем ID: {meme_id}\n\n"
+                        f"{user_text}\n\n"
+                        f"{from_text}\n"
+                        f"Публикация как: {user_publish_choice[user_id]}"
+                    ),
+                    reply_markup=keyboard_for_editor
+                )
+            elif message.video:
+                # Видео
+                video_id = message.video.file_id
+                await bot.send_video(
+                    chat_id=editor_id,
+                    video=video_id,
+                    caption=(
+                        f"Мем ID: {meme_id}\n\n"
+                        f"{user_text}\n\n"
+                        f"{from_text}\n"
                         f"Публикация как: {user_publish_choice[user_id]}"
                     ),
                     reply_markup=keyboard_for_editor
                 )
             else:
-                # Текст
+                # Текстовое сообщение
                 await bot.send_message(
                     chat_id=editor_id,
                     text=(
                         f"Мем ID: {meme_id}\n\n"
-                        f"{message.text}\n\n"
+                        f"{user_text}\n\n"
                         f"{from_text}\n"
                         f"Публикация как: {user_publish_choice[user_id]}"
                     ),
@@ -144,7 +184,7 @@ async def main():
 
         await message.answer("Ваш мем отправлен на модерацию.")
 
-    # Обработка нажатия кнопок "Одобрить"/"Отклонить" редактором
+    # Обработка кнопок "Одобрить"/"Отклонить"
     @dp.callback_query(F.data.startswith(("approve_", "reject_")))
     async def editor_callback(callback: CallbackQuery):
         data = callback.data  # например, "approve_5"
@@ -160,39 +200,50 @@ async def main():
         choice = meme_info["publish_choice"]
         original_message = meme_info["content"]
 
+        # То, что написал пользователь (caption или text)
+        user_text = original_message.caption if original_message.caption else original_message.text
+
         if action == "approve":
             try:
-                # Если это фото
+                # Формируем подпись для канала
+                # При публикации от имени пользователя или анонимно
+                if choice == "user":
+                    # Укажем @username, если есть, иначе user_id
+                    prefix = f"Мем от @{original_message.from_user.username or user_id}"
+                else:
+                    prefix = "Мем от Анонимной Аллюминиевой Картошки"
+
+                # Публикация
                 if original_message.photo:
-                    largest_photo = original_message.photo[-1].file_id
-                    caption_text = (
-                        f"Мем от @{original_message.from_user.username or user_id}"
-                        if choice == "user"
-                        else "Мем от Анонимной Аллюминиевой Картошки"
-                    )
+                    photo_id = original_message.photo[-1].file_id
                     await bot.send_photo(
                         chat_id=PUBLISH_CHAT_ID,
-                        photo=largest_photo,
-                        caption=caption_text
+                        photo=photo_id,
+                        caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
+                    )
+                elif original_message.video:
+                    video_id = original_message.video.file_id
+                    await bot.send_video(
+                        chat_id=PUBLISH_CHAT_ID,
+                        video=video_id,
+                        caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
                     )
                 else:
                     # Текст
-                    text_for_channel = (
-                        f"Мем от @{original_message.from_user.username or user_id}:\n\n{original_message.text}"
-                        if choice == "user"
-                        else f"Мем от Анонимной Аллюминиевой Картошки:\n\n{original_message.text}"
-                    )
+                    text_for_channel = f"{prefix}:\n\n{user_text}"
                     await bot.send_message(
                         chat_id=PUBLISH_CHAT_ID,
                         text=text_for_channel
                     )
 
-                # Уведомление автору (мы-то знаем его user_id внутри бота)
+                # Уведомляем автора
                 await bot.send_message(user_id, "Ваш мем одобрен и опубликован!")
                 await callback.message.answer(f"Мем (ID {meme_id}) одобрен и опубликован.")
             except Exception as e:
                 logging.error(f"Ошибка при публикации: {e}")
-                await callback.message.answer(f"Не удалось опубликовать мем {meme_id}. Ошибка: {e}")
+                await callback.message.answer(
+                    f"Не удалось опубликовать мем (ID {meme_id}). Ошибка: {e}"
+                )
         else:
             # Отклонение
             await bot.send_message(user_id, "Ваш мем отклонён редактором.")

@@ -44,7 +44,7 @@ Kartoshka Bot — это дружелюбный Telegram-бот для моде�
      PUBLISH_CHAT_ID=-100123456789
      BOT_NAME="Картошка Бот"
      POST_FREQUENCY_MINUTES=180
-     CRYPTOSELECTARCHY=false
+     CRYPTOSELECTARCHY=true
      VOTES_TO_APPROVE=3
      VOTES_TO_REJECT=3
      ```

@@ -1,6 +1,7 @@
 #!/bin/bash
 
-# Скрипт для автоматического создания systemd службы для Kartoshka Bot
+# Скрипт для автоматического создания systemd службы для Kartoshka Bot,
+# включая создание виртуального окружения и установку зависимостей.
 
 # Функция для отображения сообщений об ошибках
 function error_exit {
@@ -23,35 +24,45 @@ HOME_DIR=$(eval echo "~$USER")
 # Параметры проекта
 PROJECT_DIR="$HOME_DIR/projects/kartoshka_bot"
 SERVICE_NAME="kartoshka_bot.service"
+VENV_DIR="$PROJECT_DIR/venv"
+REQUIREMENTS_FILE="$PROJECT_DIR/requirements.txt"
+BOT_SCRIPT="$PROJECT_DIR/kartoshka_bot.py"
+ENV_FILE="$PROJECT_DIR/.env"
 
 # Проверка существования директории проекта
 if [ ! -d "$PROJECT_DIR" ]; then
     error_exit "Директория проекта не найдена: $PROJECT_DIR"
 fi
 
-# Проверка существования виртуального окружения
-VENV_DIR="$PROJECT_DIR/venv"
-if [ ! -d "$VENV_DIR" ]; then
-    error_exit "Виртуальное окружение не найдено: $VENV_DIR"
+# Проверка существования файла requirements.txt
+if [ ! -f "$REQUIREMENTS_FILE" ]; then
+    error_exit "Файл requirements.txt не найден: $REQUIREMENTS_FILE"
 fi
 
 # Проверка существования файла бота
-BOT_SCRIPT="$PROJECT_DIR/kartoshka_bot.py"
 if [ ! -f "$BOT_SCRIPT" ]; then
     error_exit "Файл бота не найден: $BOT_SCRIPT"
 fi
 
 # Проверка существования файла .env
-ENV_FILE="$PROJECT_DIR/.env"
 if [ ! -f "$ENV_FILE" ]; then
     error_exit "Файл переменных окружения не найден: $ENV_FILE"
 fi
 
-# Путь к интерпретатору Python в виртуальном окружении
-PYTHON_EXEC="$VENV_DIR/bin/python3"
-if [ ! -f "$PYTHON_EXEC" ]; then
-    error_exit "Интерпретатор Python не найден в виртуальном окружении: $PYTHON_EXEC"
+# Создание виртуального окружения, если оно не существует
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Создание виртуального окружения в $VENV_DIR..."
+    python3 -m venv "$VENV_DIR" || error_exit "Не удалось создать виртуальное окружение."
+    echo "Виртуальное окружение успешно создано."
 fi
+
+# Установка зависимостей из requirements.txt
+echo "Установка зависимостей из $REQUIREMENTS_FILE..."
+source "$VENV_DIR/bin/activate" || error_exit "Не удалось активировать виртуальное окружение."
+pip install --upgrade pip || error_exit "Не удалось обновить pip."
+pip install -r "$REQUIREMENTS_FILE" || error_exit "Не удалось установить зависимости."
+deactivate
+echo "Зависимости успешно установлены."
 
 # Путь к файлу службы systemd
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME"
@@ -67,7 +78,7 @@ User=$USER
 Group=$GROUP
 WorkingDirectory=$PROJECT_DIR
 EnvironmentFile=$ENV_FILE
-ExecStart=$PYTHON_EXEC $BOT_SCRIPT
+ExecStart=$VENV_DIR/bin/python3 $BOT_SCRIPT
 Restart=always
 RestartSec=5
 StandardOutput=journal

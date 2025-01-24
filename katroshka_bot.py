@@ -1,6 +1,8 @@
 import asyncio
 import logging
 import os
+import datetime
+import random
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
@@ -17,33 +19,58 @@ API_TOKEN = os.getenv("BOT_TOKEN")
 EDITOR_IDS_STR = os.getenv("EDITOR_IDS")  # может быть несколько ID через запятую
 PUBLISH_CHAT_ID = os.getenv("PUBLISH_CHAT_ID")
 BOT_NAME = os.getenv("BOT_NAME")
+POST_FREQUENCY_MINUTES_STR = os.getenv("POST_FREQUENCY_MINUTES")  # Частота постов в минутах (строка)
+CRYPTOSELECTARCHY_STR = os.getenv("CRYPTOSELECTARCHY")  # Строка "true" или "false"
+VOTES_TO_APPROVE_STR = os.getenv("VOTES_TO_APPROVE")
+VOTES_TO_REJECT_STR = os.getenv("VOTES_TO_REJECT")
 
-# CRYPTOSELECTARCHY:
-#   Флаг, указывающий на включение режима «Криптоселектархической олигархии» —
-#   формы правления, где решения (публикация или отклонение мема) принимаются
-#   тайным коллективным голосованием нескольких «криптоселектархов».
-#   Если CRYPTOSELECTARCHY=true, для публикации нужно набрать 3 голоса «за»,
-#   а для отклонения (снятия) — 3 голоса «против».
-CRYPTOSELECTARCHY = (os.getenv("CRYPTOSELECTARCHY", "").lower() == "true")
+# Список металлов и токсинов остаётся в коде
+METALS_AND_TOXINS = [
+    "Алюминиевой", "Железной", "Медной", "Свинцовой", "Цинковой", "Титановой", "Никелевой",
+    "Оксид-железной", "Оксид-цинковой", "Оксид-титановой", "Урановой", "Плутониевой", "Ториевой",
+    "Радиевой", "Полониевой", "Актиниевой", "Протактиниевой", "Америциевой", "Кюриевой",
+    "Нептуниевой", "Франциевой", "Лоуренсиевой", "Рутениевой", "Цезиевой", "Бериллиевой",
+    "Уран-235", "Диоксид-ториевой", "Карбонат-радиевой", "Гексафторид-урановой",
+    "Нитрат-ториевой", "Оксид-плутониевой", "Дейтериевой", "Тритиевой", "Цианистой",
+    "Рициновой", "Сариновой", "Зомановой", "Ви-Иксной (VX)", "Ботулотоксиновой",
+    "Стрихнинной", "Фосгеновой", "Диоксиновой", "Тетродоксиновой", "Полониевой-210",
+    "Меркуриевой (ртутной)", "Аманитиновой (грибной)", "Арсеновой", "Талиевой",
+    "Метанольной", "Этиленгликолевой", "Трихлорэтиленовой", "Хлориновой",
+    "Монооксид-углеродной (угарной)", "Гексафторовой", "Фторводородной",
+    "Бромацетоновой", "Хлорацетоновой", "Карбофосовой", "Хлороформовой", "Барбитуровой",
+    "Калий-цианистой", "Метилртутной"
+]
+
+# Проверка обязательных переменных окружения
+required_env_vars = {
+    "BOT_TOKEN": API_TOKEN,
+    "EDITOR_IDS": EDITOR_IDS_STR,
+    "PUBLISH_CHAT_ID": PUBLISH_CHAT_ID,
+    "BOT_NAME": BOT_NAME,
+    "POST_FREQUENCY_MINUTES": POST_FREQUENCY_MINUTES_STR,
+    "CRYPTOSELECTARCHY": CRYPTOSELECTARCHY_STR,
+    "VOTES_TO_APPROVE": VOTES_TO_APPROVE_STR,
+    "VOTES_TO_REJECT": VOTES_TO_REJECT_STR,
+}
+missing_vars = [k for k, v in required_env_vars.items() if not v]
+if missing_vars:
+    raise ValueError(f"Отсутствуют обязательные переменные окружения: {missing_vars}")
+
+# Преобразование переменных в нужные типы
+EDITOR_IDS = [int(x.strip()) for x in EDITOR_IDS_STR.split(",")]
+PUBLISH_CHAT_ID = int(PUBLISH_CHAT_ID)
+POST_FREQUENCY_MINUTES = int(POST_FREQUENCY_MINUTES_STR)
+VOTES_TO_APPROVE = int(VOTES_TO_APPROVE_STR)
+VOTES_TO_REJECT = int(VOTES_TO_REJECT_STR)
+CRYPTOSELECTARCHY = (CRYPTOSELECTARCHY_STR.lower() == "true")
 
 if CRYPTOSELECTARCHY:
     print("Криптоселектархическая олигархия включена! Власть принадлежит тайному совету мудрецов.")
 else:
     print("Единоличный Узурпатор у власти. Все решения принимает один человек.")
 
-
-required_env_vars = {
-    "BOT_TOKEN": API_TOKEN,
-    "EDITOR_IDS": EDITOR_IDS_STR,
-    "PUBLISH_CHAT_ID": PUBLISH_CHAT_ID,
-    "BOT_NAME": BOT_NAME,
-}
-missing_vars = [k for k, v in required_env_vars.items() if not v]
-if missing_vars:
-    raise ValueError(f"Отсутствуют обязательные переменные окружения: {missing_vars}")
-
-EDITOR_IDS = [int(x.strip()) for x in EDITOR_IDS_STR.split(",")]
-PUBLISH_CHAT_ID = int(PUBLISH_CHAT_ID)
+# Инициализируем бота на уровне модуля
+bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
 user_publish_choice = {}  # user_id -> "user" или "potato"
 
@@ -51,13 +78,13 @@ user_publish_choice = {}  # user_id -> "user" или "potato"
 pending_memes = {}
 meme_counter = 0
 
-# Число голосов «за» / «против», необходимое для принятия решения в режиме криптоселектархической олигархии
-VOTES_TO_APPROVE = 3
-VOTES_TO_REJECT = 3
-
+# Переменные для управления частотой публикации
+last_published_time = datetime.datetime.min
+scheduled_posts = []
 
 async def main():
-    bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
+    global last_published_time
+    global bot  # Теперь bot уже определён на уровне модуля
     dp = Dispatcher()
 
     @dp.message(Command("start"))
@@ -213,12 +240,7 @@ async def main():
 
         meme_info = pending_memes[meme_id]
         user_id = meme_info["user_id"]
-        choice = meme_info["publish_choice"]
-        original_message = meme_info["content"]
         votes_dict = meme_info["votes"]
-
-        # Текст мема
-        user_text = original_message.caption if original_message.caption else original_message.text
 
         editor_id = callback.from_user.id
         # Запоминаем голос (можно перезаписывать, если криптоселектарх хочет изменить)
@@ -229,48 +251,13 @@ async def main():
             # Обычный режим: один голос всё решает
             if action == "approve":
                 try:
-                    # Определяем «префикс» для поста
-                    if choice == "user":
-                        prefix = f"Мем от @{original_message.from_user.username or user_id}"
-                    else:
-                        prefix = "Мем от Анонимной Аллюминиевой Картошки"
-
-                    # Публикация
-                    if original_message.photo:
-                        photo_id = original_message.photo[-1].file_id
-                        await bot.send_photo(
-                            chat_id=PUBLISH_CHAT_ID,
-                            photo=photo_id,
-                            caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
-                        )
-                    elif original_message.video:
-                        video_id = original_message.video.file_id
-                        await bot.send_video(
-                            chat_id=PUBLISH_CHAT_ID,
-                            video=video_id,
-                            caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
-                        )
-                    elif original_message.animation:
-                        animation_id = original_message.animation.file_id
-                        await bot.send_animation(
-                            chat_id=PUBLISH_CHAT_ID,
-                            animation=animation_id,
-                            caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
-                        )
-                    else:
-                        # Текст
-                        text_for_channel = f"{prefix}\n\n{user_text}"
-                        await bot.send_message(
-                            chat_id=PUBLISH_CHAT_ID,
-                            text=text_for_channel
-                        )
-
-                    await bot.send_message(user_id, "Ваш мем одобрен и опубликован!")
-                    await callback.message.answer(f"Мем (ID {meme_id}) одобрен и опубликован.")
+                    await schedule_or_publish_meme(meme_info)
+                    await callback.message.answer(f"Мем (ID {meme_id}) одобрен и будет опубликован.")
+                    # Уведомление пользователю будет отправлено внутри schedule_or_publish_meme
                 except Exception as e:
                     logging.error(f"Ошибка при публикации: {e}")
                     await callback.message.answer(
-                        f"Не удалось опубликовать мем (ID {meme_id}). Ошибка: {e}"
+                        f"Не удалось обработать мем (ID {meme_id}). Ошибка: {e}"
                     )
             else:
                 # Отклонение
@@ -302,44 +289,11 @@ async def main():
                 "Ещё один Криптоселектарх отверг ваш несмешной мем!"
             )
 
-        # Если набралось 3 голоса «за», публикуем
+        # Если набралось достаточное количество голосов «за», публикуем
         if approves >= VOTES_TO_APPROVE:
             try:
-                if choice == "user":
-                    prefix = f"Мем от @{original_message.from_user.username or user_id}"
-                else:
-                    prefix = "Мем от Анонимной Аллюминиевой Картошки"
-
-                if original_message.photo:
-                    photo_id = original_message.photo[-1].file_id
-                    await bot.send_photo(
-                        chat_id=PUBLISH_CHAT_ID,
-                        photo=photo_id,
-                        caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
-                    )
-                elif original_message.video:
-                    video_id = original_message.video.file_id
-                    await bot.send_video(
-                        chat_id=PUBLISH_CHAT_ID,
-                        video=video_id,
-                        caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
-                    )
-                elif original_message.animation:
-                    animation_id = original_message.animation.file_id
-                    await bot.send_animation(
-                        chat_id=PUBLISH_CHAT_ID,
-                        animation=animation_id,
-                        caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
-                    )
-                else:
-                    # Текст
-                    text_for_channel = f"{prefix}\n\n{user_text}"
-                    await bot.send_message(
-                        chat_id=PUBLISH_CHAT_ID,
-                        text=text_for_channel
-                    )
-
-                await bot.send_message(user_id, "Ваш мем набрал достаточно голосов и опубликован!")
+                await schedule_or_publish_meme(meme_info)
+                # Уведомление пользователю будет отправлено внутри schedule_or_publish_meme
                 del pending_memes[meme_id]
 
                 # Отключаем кнопки в сообщении, т.к. решение принято
@@ -348,11 +302,11 @@ async def main():
             except Exception as e:
                 logging.error(f"Ошибка при публикации: {e}")
                 await callback.message.answer(
-                    f"Не удалось опубликовать мем (ID {meme_id}). Ошибка: {e}"
+                    f"Не удалось обработать мем (ID {meme_id}). Ошибка: {e}"
                 )
             return
 
-        # Если набралось 3 голоса «против», отклоняем
+        # Если набралось достаточное количество голосов «против», отклоняем
         if rejects >= VOTES_TO_REJECT:
             await bot.send_message(user_id, "Мем набрал слишком много голосов ПРОТИВ и отклонён.")
             del pending_memes[meme_id]
@@ -363,8 +317,103 @@ async def main():
 
         # Если голосов ещё недостаточно, ждём дальнейших.
 
-    await dp.start_polling(bot)
+    async def schedule_or_publish_meme(meme_info):
+        global last_published_time, scheduled_posts
+        user_id = meme_info["user_id"]
+        now = datetime.datetime.now()
+        next_possible_time = last_published_time + datetime.timedelta(minutes=POST_FREQUENCY_MINUTES)
 
+        # Определяем время публикации
+        if now >= next_possible_time and not scheduled_posts:
+            # Публикуем немедленно
+            await publish_meme(meme_info)
+            last_published_time = datetime.datetime.now()
+            # Уведомляем пользователя
+            await bot.send_message(user_id, "Ваш мем одобрен и опубликован!")
+        else:
+            # Планируем публикацию
+            if scheduled_posts:
+                # Запланировать после последнего запланированного мема
+                last_scheduled_time = scheduled_posts[-1][0]
+                scheduled_time = last_scheduled_time + datetime.timedelta(minutes=POST_FREQUENCY_MINUTES)
+            else:
+                scheduled_time = next_possible_time
+
+            scheduled_posts.append((scheduled_time, meme_info))
+            await bot.send_message(user_id, f"Ваш мем одобрен и теперь ждёт очереди на публикацию. Ориентировочное время публикации: {scheduled_time.strftime('%H:%M')}")
+            # Сортируем список запланированных постов по времени
+            scheduled_posts.sort(key=lambda x: x[0])
+
+    async def publish_meme(meme_info):
+        user_id = meme_info["user_id"]
+        choice = meme_info["publish_choice"]
+        original_message = meme_info["content"]
+
+        # Текст мема
+        user_text = original_message.caption if original_message.caption else original_message.text
+
+        # Определяем «префикс» для поста
+        if choice == "user":
+            prefix = f"Мем от @{original_message.from_user.username or user_id}"
+        else:
+            random_metal = random.choice(METALS_AND_TOXINS)
+            prefix = f"Мем от Анонимной {random_metal} Картошки"
+
+        try:
+            if original_message.photo:
+                photo_id = original_message.photo[-1].file_id
+                await bot.send_photo(
+                    chat_id=PUBLISH_CHAT_ID,
+                    photo=photo_id,
+                    caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
+                )
+            elif original_message.video:
+                video_id = original_message.video.file_id
+                await bot.send_video(
+                    chat_id=PUBLISH_CHAT_ID,
+                    video=video_id,
+                    caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
+                )
+            elif original_message.animation:
+                animation_id = original_message.animation.file_id
+                await bot.send_animation(
+                    chat_id=PUBLISH_CHAT_ID,
+                    animation=animation_id,
+                    caption=(f"{prefix}\n\n{user_text}" if user_text else prefix)
+                )
+            else:
+                # Текст
+                text_for_channel = f"{prefix}\n\n{user_text}"
+                await bot.send_message(
+                    chat_id=PUBLISH_CHAT_ID,
+                    text=text_for_channel
+                )
+        except Exception as e:
+            logging.error(f"Ошибка при публикации: {e}")
+
+    async def scheduled_publisher():
+        global scheduled_posts, last_published_time
+        while True:
+            now = datetime.datetime.now()
+            if scheduled_posts:
+                scheduled_posts.sort(key=lambda x: x[0])  # сортируем по времени
+                next_time, meme_info = scheduled_posts[0]
+                wait_seconds = (next_time - now).total_seconds()
+                if wait_seconds > 0:
+                    await asyncio.sleep(min(wait_seconds, 10))
+                else:
+                    # Время публикации
+                    scheduled_posts.pop(0)
+                    await publish_meme(meme_info)
+                    last_published_time = datetime.datetime.now()
+            else:
+                # Нет запланированных постов, ждем немного
+                await asyncio.sleep(10)
+
+    # Запускаем задачу для управления расписанием публикаций
+    asyncio.create_task(scheduled_publisher())
+
+    await dp.start_polling(bot)
 
 if __name__ == "__main__":
     asyncio.run(main())

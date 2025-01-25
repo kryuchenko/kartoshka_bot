@@ -380,7 +380,7 @@ async def main():
                 scheduled_time = next_possible_time
 
             scheduled_posts.append((scheduled_time, meme_info))
-            await bot.send_message(user_id, f"Ваш мем одобрен и теперь ждёт очереди на публикацию. Ориентировочное время публикации: {scheduled_time.strftime('%H:%M')}")
+            await bot.send_message(user_id, f"Ваш мем одобрен и теперь ждёт очереди на публикацию. Ориентировочное время публикации: {scheduled_time.strftime('%H:%M')} по UTC")
             # Сортируем список запланированных постов по времени
             scheduled_posts.sort(key=lambda x: x[0])
 

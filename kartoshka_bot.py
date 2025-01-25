@@ -243,8 +243,18 @@ async def main():
         votes_dict = meme_info["votes"]
 
         editor_id = callback.from_user.id
-        # Запоминаем голос (можно перезаписывать, если криптоселектарх хочет изменить)
-        votes_dict[editor_id] = action  # "approve" или "reject"
+
+        # Получаем предыдущий голос криптоселектарха (если был)
+        prev_vote = votes_dict.get(editor_id)
+
+        # Проверяем, изменился ли голос
+        if prev_vote == action:
+            # Голос не изменился, не нужно повторно уведомлять пользователя
+            await callback.answer("Ваш голос уже был учтён.", show_alert=False)
+            return
+        else:
+            # Обновляем голос криптоселектарха
+            votes_dict[editor_id] = action  # "approve" или "reject"
 
         # --- Если криптоселектархическая олигархия (Cryptoselectarchy) выключена ---
         if not CRYPTOSELECTARCHY:
@@ -263,7 +273,6 @@ async def main():
                 # Отклонение
                 await bot.send_message(user_id, "Ваш мем отклонён редактором.")
                 await callback.message.answer(f"Мем (ID {meme_id}) отклонён.")
-
             # Убираем из «ожидания»
             del pending_memes[meme_id]
             await callback.answer()
@@ -273,23 +282,52 @@ async def main():
         # Подсчитываем голоса
         approves = sum(1 for v in votes_dict.values() if v == "approve")
         rejects = sum(1 for v in votes_dict.values() if v == "reject")
+        total_votes = len(votes_dict)
 
         # Уведомляем криптоселектарха, что его голос учтён
-        await callback.answer("Ваш голос учтён", show_alert=False)
+        await callback.answer("Ваш голос учтён.", show_alert=False)
 
-        # Отправляем автору уведомление о каждом новом голосе
-        if action == "approve":
-            await bot.send_message(
-                user_id,
-                "Ещё один Криптоселектарх проголосовал ЗА ваш мем!"
-            )
-        else:  # reject
-            await bot.send_message(
-                user_id,
-                "Ещё один Криптоселектарх отверг ваш несмешной мем!"
-            )
+        # Отправляем автору уведомление о голосе
+        if prev_vote is None:
+            # Новый голос от этого криптоселектарха
+            if total_votes == 1:
+                # Это первый голос по этому мему
+                if action == "approve":
+                    await bot.send_message(
+                        user_id,
+                        "Криптоселектарх проголосовал ЗА ваш мем!"
+                    )
+                else:
+                    await bot.send_message(
+                        user_id,
+                        "Криптоселектарх отверг ваш несмешной мем!"
+                    )
+            else:
+                # Не первый голос, но этот криптоселектарх голосует впервые
+                if action == "approve":
+                    await bot.send_message(
+                        user_id,
+                        "Ещё один Криптоселектарх проголосовал ЗА ваш мем!"
+                    )
+                else:
+                    await bot.send_message(
+                        user_id,
+                        "Ещё один Криптоселектарх отверг ваш несмешной мем!"
+                    )
+        else:
+            # Криптоселектарх изменил своё решение
+            if action == "approve":
+                await bot.send_message(
+                    user_id,
+                    "Мудрый Криптоселектарх передумал и теперь ГОЛОСУЕТ ЗА ваш мем."
+                )
+            else:
+                await bot.send_message(
+                    user_id,
+                    "Мудрый Криптоселектарх передумал и теперь ГОЛОСУЕТ ПРОТИВ вашего мема."
+                )
 
-        # Если набралось достаточное количество голосов «за», публикуем
+        # Проверяем, достигнут ли пороги голосования
         if approves >= VOTES_TO_APPROVE:
             try:
                 await schedule_or_publish_meme(meme_info)
@@ -306,7 +344,6 @@ async def main():
                 )
             return
 
-        # Если набралось достаточное количество голосов «против», отклоняем
         if rejects >= VOTES_TO_REJECT:
             await bot.send_message(user_id, "Мем набрал слишком много голосов ПРОТИВ и отклонён.")
             del pending_memes[meme_id]

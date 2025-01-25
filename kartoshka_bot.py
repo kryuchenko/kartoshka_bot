@@ -193,37 +193,40 @@ async def main():
 
         # Рассылаем сообщение всем «криптоселектархам» (EDITOR_IDS)
         for editor_id in EDITOR_IDS:
-            if message.photo:
-                largest_photo_id = message.photo[-1].file_id
-                await bot.send_photo(
-                    chat_id=editor_id,
-                    photo=largest_photo_id,
-                    caption=meme_info_text,
-                    reply_markup=keyboard_for_editor
-                )
-            elif message.video:
-                video_id = message.video.file_id
-                await bot.send_video(
-                    chat_id=editor_id,
-                    video=video_id,
-                    caption=meme_info_text,
-                    reply_markup=keyboard_for_editor
-                )
-            elif message.animation:
-                animation_id = message.animation.file_id
-                await bot.send_animation(
-                    chat_id=editor_id,
-                    animation=animation_id,
-                    caption=meme_info_text,
-                    reply_markup=keyboard_for_editor
-                )
-            else:
-                # Текстовый мем
-                await bot.send_message(
-                    chat_id=editor_id,
-                    text=meme_info_text,
-                    reply_markup=keyboard_for_editor
-                )
+            try:
+                if message.photo:
+                    largest_photo_id = message.photo[-1].file_id
+                    await bot.send_photo(
+                        chat_id=editor_id,
+                        photo=largest_photo_id,
+                        caption=meme_info_text,
+                        reply_markup=keyboard_for_editor
+                    )
+                elif message.video:
+                    video_id = message.video.file_id
+                    await bot.send_video(
+                        chat_id=editor_id,
+                        video=video_id,
+                        caption=meme_info_text,
+                        reply_markup=keyboard_for_editor
+                    )
+                elif message.animation:
+                    animation_id = message.animation.file_id
+                    await bot.send_animation(
+                        chat_id=editor_id,
+                        animation=animation_id,
+                        caption=meme_info_text,
+                        reply_markup=keyboard_for_editor
+                    )
+                else:
+                    # Текстовый мем
+                    await bot.send_message(
+                        chat_id=editor_id,
+                        text=meme_info_text,
+                        reply_markup=keyboard_for_editor
+                    )
+            except Exception as e:
+                logging.error(f"Не удалось отправить сообщение криптоселектарху {editor_id}: {e}")
 
         await message.answer("Ваш мем отправлен на модерацию.")
 

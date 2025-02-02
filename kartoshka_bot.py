@@ -355,8 +355,8 @@ async def main():
         # Формируем кнопки для криптоселектархов
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅Одобрить", callback_data=f"approve_{meme.meme_id}"),
-                InlineKeyboardButton(text="⚡Срочно Одобрить⚡", callback_data=f"urgent_{meme.meme_id}"),
+                InlineKeyboardButton(text="✅Одобр.", callback_data=f"approve_{meme.meme_id}"),
+                InlineKeyboardButton(text="⚡Срочно⚡", callback_data=f"urgent_{meme.meme_id}"),
                 InlineKeyboardButton(text="❌Отклонить", callback_data=f"reject_{meme.meme_id}")
             ]
         ])

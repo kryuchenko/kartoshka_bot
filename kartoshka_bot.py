@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import random
+import math
 from datetime import datetime, timezone, timedelta
 
 from aiogram import Bot, Dispatcher, F
@@ -158,17 +159,25 @@ class Meme:
 
     def count_votes(self, vote_type: str) -> int:
         if vote_type == "approve":
-            # Суммируем и обычные голоса "approve", и "urgent"
+            # Суммируем обычные голоса "approve" и "urgent"
             return sum(1 for v in self.votes.values() if v in ("approve", "urgent"))
         return sum(1 for v in self.votes.values() if v == vote_type)
 
     def is_approved(self) -> bool:
+        """
+        Возвращает True, если общее число голосов (approve + urgent) достигло значения VOTES_TO_APPROVE.
+        """
         total_approves = self.count_votes("approve")
+        return total_approves >= VOTES_TO_APPROVE
+
+    def is_urgent(self) -> bool:
+        """
+        Возвращает True, если число голосов "urgent" не меньше 51% от VOTES_TO_APPROVE.
+        Например, при VOTES_TO_APPROVE = 3 необходимо минимум math.ceil(3*0.51)=2 срочных голоса.
+        """
         urgent_count = self.count_votes("urgent")
-        # Если общее число одобрений >= порога, или если доля срочных голосов ≥ 51%
-        if total_approves >= VOTES_TO_APPROVE or (total_approves > 0 and (urgent_count / total_approves) >= 0.51):
-            return True
-        return False
+        urgent_threshold = math.ceil(VOTES_TO_APPROVE * 0.51)
+        return urgent_count >= urgent_threshold
 
     def is_rejected(self) -> bool:
         return self.count_votes("reject") >= VOTES_TO_REJECT
@@ -210,7 +219,7 @@ class Scheduler:
             self.last_published_time = datetime.now(timezone.utc)
             await bot.send_message(meme.user_id, "Ваш мем одобрен и опубликован немедленно!")
         else:
-            # Определяем время, когда реально будет опубликован этот мем
+            # Определяем время публикации этого мема
             if self.scheduled_posts:
                 last_scheduled_time = self.scheduled_posts[-1][0]
                 scheduled_time = last_scheduled_time + timedelta(minutes=self.post_frequency_minutes)
@@ -220,7 +229,7 @@ class Scheduler:
             self.scheduled_posts.append((scheduled_time, meme))
             self.scheduled_posts.sort(key=lambda x: x[0])
 
-            # Считаем, через сколько времени (в минутах/часах) это произойдёт
+            # Расчёт оставшегося времени
             time_diff = (scheduled_time - now).total_seconds()
             if time_diff < 0:
                 time_diff = 0
@@ -249,7 +258,7 @@ class Scheduler:
                 wait_seconds = (next_time - now).total_seconds()
 
                 if wait_seconds > 0:
-                    # Спим либо до публикации, либо 10 секунд (чтобы периодически проверять)
+                    # Спим либо до публикации, либо 10 секунд для проверки
                     await asyncio.sleep(min(wait_seconds, 10))
                 else:
                     self.scheduled_posts.pop(0)
@@ -272,7 +281,7 @@ async def remove_voting_buttons(meme: Meme):
 async def publish_meme(meme: Meme):
     try:
         await send_media_message(
-            telegram_bot=bot,    # <-- Параметр теперь называется telegram_bot
+            telegram_bot=bot,  # параметр telegram_bot
             chat_id=PUBLISH_CHAT_ID,
             content=meme.content,
             caption=meme.get_caption()
@@ -281,7 +290,7 @@ async def publish_meme(meme: Meme):
         logging.error(f"Ошибка при публикации: {e}")
 
 
-# Глобальные структуры для хранения мему
+# Глобальные структуры для хранения мема
 pending_memes = {}
 meme_counter = 0
 scheduler = Scheduler(POST_FREQUENCY_MINUTES)
@@ -298,7 +307,6 @@ async def main():
             [InlineKeyboardButton(text="🥔 Анонимно (от «Картошки»).", callback_data="choice_potato")]
         ])
 
-        # Меняем эту часть ↓
         if CRYPTOSELECTARCHY:
             intro_text = (
                 f"Привет! Я бот {BOT_NAME}.\n\n"
@@ -347,9 +355,9 @@ async def main():
         # Формируем кнопки для криптоселектархов
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_{meme.meme_id}"),
-                InlineKeyboardButton(text="⚡Одобрить срочно⚡", callback_data=f"urgent_{meme.meme_id}"),
-                InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{meme.meme_id}")
+                InlineKeyboardButton(text="✅Одобрить", callback_data=f"approve_{meme.meme_id}"),
+                InlineKeyboardButton(text="⚡Срочно Одобрить⚡", callback_data=f"urgent_{meme.meme_id}"),
+                InlineKeyboardButton(text="❌Отклонить", callback_data=f"reject_{meme.meme_id}")
             ]
         ])
 
@@ -369,7 +377,7 @@ async def main():
         for crypto_id in EDITOR_IDS:
             try:
                 sent_msg = await send_media_message(
-                    telegram_bot=bot,    # Передаём аргумент telegram_bot
+                    telegram_bot=bot,
                     chat_id=crypto_id,
                     content=message,
                     caption=info_text,
@@ -396,11 +404,9 @@ async def main():
         # Добавляем голос криптоселектарха и получаем предыдущий голос (если был)
         prev_vote = meme.add_vote(crypto_id, action)
 
-        # Формируем ответ пользователю (в зависимости от того, был ли это первый голос или последующий)
+        # Формируем ответ пользователю
         if prev_vote is None:
-            # Это первый голос данного криптоселектарха по этому мему
             if len(meme.votes) == 1:
-                # Первый голос по всему мему вообще
                 if action == "urgent":
                     message_text = "Криптоселектарх проголосовал срочную публикацию мема!"
                 elif action == "approve":
@@ -408,7 +414,6 @@ async def main():
                 else:
                     message_text = "Криптоселектарх отверг ваш несмешной мем!"
             else:
-                # Уже есть другие голоса, это не первый голос
                 if action == "urgent":
                     message_text = "Ещё один криптоселектарх проголосовал срочную публикацию мема!"
                 elif action == "approve":
@@ -417,28 +422,25 @@ async def main():
                     message_text = "Ещё один криптоселектарх отверг ваш несмешной мем!"
             await bot.send_message(meme.user_id, message_text)
         else:
-            # Криптоселектарх меняет своё решение
             await bot.send_message(meme.user_id, "Мудрый криптоселектарх изменил своё решение.")
 
         await callback.answer("Ваш голос учтён.", show_alert=False)
 
-        # Если CRYPTOSELECTARCHY=False, то работаем в «одноголосном» режиме
+        # Если CRYPTOSELECTARCHY=False, работаем в одноголосном режиме
         if not CRYPTOSELECTARCHY:
             if action in ("approve", "urgent"):
                 await scheduler.schedule(meme)
                 await bot.send_message(meme.user_id, f"Мем (ID {meme.meme_id}) одобрен и будет опубликован.")
             else:
                 await bot.send_message(meme.user_id, "Ваш мем отклонён криптоселектархом.")
-            # Удаляем кнопки у всех
             await remove_voting_buttons(meme)
             del pending_memes[meme.meme_id]
             return
 
-        # Иначе многоголосная логика:
+        # Многоголосная логика: проверяем, достигнуто ли общее число голосов
         if meme.is_approved():
             if action in ("approve", "urgent"):
-                # Проверяем срочные голоса
-                if meme.count_votes("urgent") / meme.count_votes("approve") >= 0.51:
+                if meme.is_urgent():
                     await publish_meme(meme)
                     await bot.send_message(meme.user_id, "Ваш мем одобрен срочно и опубликован без очереди!")
                 else:
@@ -456,7 +458,7 @@ async def main():
 
     # Запускаем планировщик
     asyncio.create_task(scheduler.run())
-    # Запускаем бот
+    # Запускаем бота
     await dp.start_polling(bot)
 
 

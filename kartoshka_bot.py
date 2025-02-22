@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import asyncio
 import logging
 import os
@@ -529,10 +530,19 @@ async def main():
             ]
         ])
 
-        from_text = ("От пользователя" if chosen_mode == "user" else "От Анонимного пользователя")
+        # Если мем от неанонимного пользователя, показываем username (если есть) или ID;
+        # если мем от анонима, то выводим "Картошка"
+        if chosen_mode == "user":
+            if message.from_user.username:
+                from_text = f"@{message.from_user.username}"
+            else:
+                from_text = f"{message.from_user.id}"
+        else:
+            from_text = "Картошка"
+
         user_text = message.caption if message.caption else message.text
         info_text = (
-            f"Мем ID: {meme.meme_id}\n\n{user_text}\n\n{from_text}\n"
+            f"Мем ID: {meme.meme_id}\n\n{user_text}\n\nОт: {from_text}\n"
             f"Публикация как: {chosen_mode}"
         )
 
@@ -565,6 +575,7 @@ async def main():
         prev_vote = meme.add_vote(crypto_id, action)
         scheduler.save_moderation()
 
+        # Новая логика: уведомляем только при первом голосе или при реальном изменении решения
         if prev_vote is None:
             if len(meme.votes) == 1:
                 if action == "urgent":
@@ -583,14 +594,18 @@ async def main():
             if meme.user_id is not None:
                 await bot.send_message(meme.user_id, message_text)
         else:
-            if action == "urgent":
-                new_vote_text = "срочную публикацию!"
-            elif action == "approve":
-                new_vote_text = "ЗА мем!"
+            if prev_vote == action:
+                # Повторное нажатие той же кнопки – уведомлений не отправляем.
+                pass
             else:
-                new_vote_text = "отказ от публикации!"
-            if meme.user_id is not None:
-                await bot.send_message(meme.user_id, f"Криптоселектарх изменил мнение. Новое решение: {new_vote_text}")
+                if action == "urgent":
+                    new_vote_text = "срочную публикацию!"
+                elif action == "approve":
+                    new_vote_text = "ЗА мем!"
+                else:
+                    new_vote_text = "отказ от публикации!"
+                if meme.user_id is not None:
+                    await bot.send_message(meme.user_id, f"Криптоселектарх изменил мнение. Новое решение: {new_vote_text}")
 
         await callback.answer("Ваш голос учтен.", show_alert=False)
 

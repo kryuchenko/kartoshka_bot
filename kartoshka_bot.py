@@ -70,6 +70,7 @@ METALS_AND_TOXINS = [
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
+# Глобальный выбор способа публикации
 user_publish_choice: Dict[int, str] = {}
 
 def serialize_message(message: Message) -> dict:
@@ -174,8 +175,6 @@ async def send_media_message(
             reply_markup=reply_markup
         )
 
-from typing import Optional
-
 class Meme:
     def __init__(
         self,
@@ -184,8 +183,9 @@ class Meme:
         publish_choice: str,
         content: AnyMessage
     ):
+        # Сохраняем user_id в оперативной памяти (для уведомлений до ребута)
         self.meme_id = meme_id
-        self.user_id = user_id
+        self.user_id = user_id  
         self.publish_choice = publish_choice
         self.content = content
         self.votes = {}
@@ -231,6 +231,8 @@ class Meme:
         return f"{prefix}\n\n{user_text}" if user_text else prefix
 
     def to_dict(self) -> dict:
+        # Для модерации сохраняем полную информацию (включая голоса),
+        # но НЕ сохраняем user_id (для анонимности)
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
@@ -241,6 +243,7 @@ class Meme:
         return meme_dict
 
     def to_publication_dict(self) -> dict:
+        # Для публикации сохраняем данные без голосов
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
@@ -254,7 +257,7 @@ class Meme:
         content = deserialize_message(d["content"])
         meme = Meme(
             meme_id=d["meme_id"],
-            user_id=None,
+            user_id=None,  # При загрузке из файлов user_id не восстанавливается
             publish_choice=d["publish_choice"],
             content=content
         )
@@ -353,7 +356,6 @@ class Scheduler:
         self.save_publication()
         self.save_moderation()
 
-        # Отправляем уведомление, если user_id есть
         if meme.publish_choice == "user" and meme.user_id is not None:
             time_diff = (scheduled_time - now).total_seconds()
             if time_diff < 0:
@@ -380,7 +382,6 @@ class Scheduler:
                 del self.pending_memes[mid]
                 self.save_moderation()
 
-            # Публикуем, если пришло время
             if self.scheduled_posts:
                 self.scheduled_posts.sort(key=lambda x: datetime.fromisoformat(x["scheduled_time"]))
                 next_entry = self.scheduled_posts[0]
@@ -434,7 +435,7 @@ async def main():
         if CRYPTOSELECTARCHY:
             intro_text = (
                 f"Привет! Я {BOT_NAME}.\n\n"
-                "Криптоселектархическая олигархия!\n"
+                "Да здравствует Криптоселектархическая олигархия!\n"
                 "Решения принимаются коллективно.\n\n"
                 "Как вы хотите опубликовать мем?"
             )
@@ -467,7 +468,8 @@ async def main():
         global meme_counter
         meme_counter += 1
         chosen_mode = user_publish_choice[user_id]
-        real_user_id: Optional[int] = user_id if chosen_mode == "user" else None
+        # Сохраняем user_id в оперативной памяти даже для анонимных, чтобы отправлять уведомления до перезагрузки.
+        real_user_id: Optional[int] = user_id
 
         meme = Meme(
             meme_id=meme_counter,
@@ -520,8 +522,9 @@ async def main():
         meme = scheduler.pending_memes[meme_id]
         crypto_id = callback.from_user.id
         prev_vote = meme.add_vote(crypto_id, action)
+        # Сохраняем обновлённое состояние голосов сразу после добавления голоса
+        scheduler.save_moderation()
 
-        # Уведомления (в оперативной памяти)
         if prev_vote is None:
             if len(meme.votes) == 1:
                 if action == "urgent":
@@ -549,15 +552,13 @@ async def main():
             if meme.publish_choice == "user" and meme.user_id is not None:
                 await bot.send_message(meme.user_id, f"Редактор изменил мнение. Новое решение: {new_vote_text}")
 
-        await callback.answer("Ваш голос учтён.", show_alert=False)
+        await callback.answer("Ваш голос учтен.", show_alert=False)
 
         # --- Единоличный режим (CRYPTOSELECTARCHY=False) ---
         if not CRYPTOSELECTARCHY:
-            # Любое голосование сразу решает судьбу мема
             if action in ("approve", "urgent"):
                 if action == "urgent":
                     resolution = "⚡ Одобрен срочно"
-                    # Публикуем сразу (без очереди) или можно schedule + отдельный urgent режим
                     await publish_meme(meme)
                     if meme.publish_choice == "user" and meme.user_id is not None:
                         await bot.send_message(meme.user_id, "Ваш мем одобрен срочно и опубликован!")
@@ -578,7 +579,6 @@ async def main():
             return
 
         # --- Многоголосие (CRYPTOSELECTARCHY=True) ---
-        # Если мем одобрен (достиг нужных голосов) и не финализирован
         if meme.is_approved() and not meme.finalized:
             if meme.is_urgent():
                 resolution = "⚡ Одобрен срочно"
@@ -597,7 +597,6 @@ async def main():
             scheduler.save_moderation()
             return
 
-        # Если мем отклонён (достиг нужных голосов против)
         if meme.is_rejected() and not meme.finalized:
             resolution = "❌ Отклонён"
             if meme.publish_choice == "user" and meme.user_id is not None:

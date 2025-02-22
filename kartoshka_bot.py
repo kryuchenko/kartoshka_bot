@@ -183,7 +183,7 @@ class Meme:
         publish_choice: str,
         content: AnyMessage
     ):
-        # Сохраняем user_id в оперативной памяти (для уведомлений до ребута)
+        # Всегда сохраняем user_id в памяти, чтобы до перезагрузки отправлять уведомления
         self.meme_id = meme_id
         self.user_id = user_id  
         self.publish_choice = publish_choice
@@ -231,8 +231,8 @@ class Meme:
         return f"{prefix}\n\n{user_text}" if user_text else prefix
 
     def to_dict(self) -> dict:
-        # Для модерации сохраняем полную информацию (включая голоса),
-        # но НЕ сохраняем user_id (для анонимности)
+        # Для модерации сохраняем полную информацию, включая голоса.
+        # Для анонимных (potato) не сохраняем user_id.
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
@@ -240,24 +240,29 @@ class Meme:
             "created_time": self.created_time.isoformat(),
             "votes": self.votes
         }
+        if self.publish_choice != "potato":
+            meme_dict["user_id"] = self.user_id
         return meme_dict
 
     def to_publication_dict(self) -> dict:
-        # Для публикации сохраняем данные без голосов
+        # Для публикации сохраняем данные без голосов.
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
             "content": serialize_message(self.content),
             "created_time": self.created_time.isoformat()
         }
+        if self.publish_choice != "potato":
+            meme_dict["user_id"] = self.user_id
         return meme_dict
 
     @staticmethod
     def from_dict(d: dict) -> "Meme":
         content = deserialize_message(d["content"])
+        # При загрузке из файлов user_id не восстанавливается (для анонимности)
         meme = Meme(
             meme_id=d["meme_id"],
-            user_id=None,  # При загрузке из файлов user_id не восстанавливается
+            user_id=None,
             publish_choice=d["publish_choice"],
             content=content
         )
@@ -356,6 +361,7 @@ class Scheduler:
         self.save_publication()
         self.save_moderation()
 
+        # До перезагрузки отправляем уведомление, используя сохранённый в памяти user_id
         if meme.publish_choice == "user" and meme.user_id is not None:
             time_diff = (scheduled_time - now).total_seconds()
             if time_diff < 0:
@@ -373,7 +379,7 @@ class Scheduler:
     async def run(self):
         while True:
             now = datetime.now(timezone.utc)
-            # Удаляем заявки, которым больше 3 дней
+            # Удаляем заявки старше 3 дней
             expired = []
             for mem_id, meme in list(self.pending_memes.items()):
                 if now - meme.created_time > timedelta(days=3):
@@ -468,7 +474,7 @@ async def main():
         global meme_counter
         meme_counter += 1
         chosen_mode = user_publish_choice[user_id]
-        # Сохраняем user_id в оперативной памяти даже для анонимных, чтобы отправлять уведомления до перезагрузки.
+        # Всегда сохраняем user_id в памяти (для уведомлений до перезагрузки)
         real_user_id: Optional[int] = user_id
 
         meme = Meme(
@@ -540,7 +546,8 @@ async def main():
                     message_text = "Еще один редактор проголосовал ЗА мем!"
                 else:
                     message_text = "Еще один редактор отверг мем!"
-            if meme.publish_choice == "user" and meme.user_id is not None:
+            # Отправляем уведомление независимо от выбранного режима
+            if meme.user_id is not None:
                 await bot.send_message(meme.user_id, message_text)
         else:
             if action == "urgent":
@@ -549,7 +556,7 @@ async def main():
                 new_vote_text = "ЗА мем!"
             else:
                 new_vote_text = "отказ от публикации!"
-            if meme.publish_choice == "user" and meme.user_id is not None:
+            if meme.user_id is not None:
                 await bot.send_message(meme.user_id, f"Редактор изменил мнение. Новое решение: {new_vote_text}")
 
         await callback.answer("Ваш голос учтен.", show_alert=False)
@@ -560,16 +567,16 @@ async def main():
                 if action == "urgent":
                     resolution = "⚡ Одобрен срочно"
                     await publish_meme(meme)
-                    if meme.publish_choice == "user" and meme.user_id is not None:
+                    if meme.user_id is not None:
                         await bot.send_message(meme.user_id, "Ваш мем одобрен срочно и опубликован!")
                 else:
                     resolution = "✅ Одобрен"
                     await scheduler.schedule(meme)
-                    if meme.publish_choice == "user" and meme.user_id is not None:
+                    if meme.user_id is not None:
                         await bot.send_message(meme.user_id, "Ваш мем одобрен и будет опубликован.")
             else:
                 resolution = "❌ Отклонён"
-                if meme.publish_choice == "user" and meme.user_id is not None:
+                if meme.user_id is not None:
                     await bot.send_message(meme.user_id, "Мем отклонён Единоличным Узурпатором.")
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
@@ -583,12 +590,12 @@ async def main():
             if meme.is_urgent():
                 resolution = "⚡ Одобрен срочно"
                 await publish_meme(meme)
-                if meme.publish_choice == "user" and meme.user_id is not None:
+                if meme.user_id is not None:
                     await bot.send_message(meme.user_id, "Ваш мем одобрен срочно и опубликован!")
             else:
                 resolution = "✅ Одобрен"
                 await scheduler.schedule(meme)
-                if meme.publish_choice == "user" and meme.user_id is not None:
+                if meme.user_id is not None:
                     await bot.send_message(meme.user_id, "Ваш мем одобрен и будет опубликован.")
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
@@ -599,7 +606,7 @@ async def main():
 
         if meme.is_rejected() and not meme.finalized:
             resolution = "❌ Отклонён"
-            if meme.publish_choice == "user" and meme.user_id is not None:
+            if meme.user_id is not None:
                 await bot.send_message(meme.user_id, "Мем набрал слишком много голосов ПРОТИВ и отклонён.")
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"

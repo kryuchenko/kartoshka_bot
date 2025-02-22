@@ -183,7 +183,7 @@ class Meme:
         publish_choice: str,
         content: AnyMessage
     ):
-        # Всегда сохраняем user_id в памяти, чтобы до перезагрузки отправлять уведомления
+        # Сохраняем user_id в оперативной памяти, чтобы до перезагрузки можно было отправлять уведомления
         self.meme_id = meme_id
         self.user_id = user_id  
         self.publish_choice = publish_choice
@@ -231,8 +231,8 @@ class Meme:
         return f"{prefix}\n\n{user_text}" if user_text else prefix
 
     def to_dict(self) -> dict:
-        # Для модерации сохраняем полную информацию, включая голоса.
-        # Для анонимных (potato) не сохраняем user_id.
+        # Для модерационной очереди сохраняем полную информацию (включая голоса)
+        # Но для анонимных (potato) не сохраняем user_id.
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
@@ -259,10 +259,9 @@ class Meme:
     @staticmethod
     def from_dict(d: dict) -> "Meme":
         content = deserialize_message(d["content"])
-        # При загрузке из файлов user_id не восстанавливается (для анонимности)
         meme = Meme(
             meme_id=d["meme_id"],
-            user_id=None,
+            user_id=None,  # При загрузке из файлов user_id не восстанавливается
             publish_choice=d["publish_choice"],
             content=content
         )
@@ -281,6 +280,20 @@ class Scheduler:
         self.scheduled_posts = []
         self.load_moderation()
         self.load_publication()
+        # Обновляем глобальный счетчик meme_counter по максимуму из загруженных данных
+        global meme_counter
+        meme_counter = self.get_max_meme_id()
+
+    def get_max_meme_id(self) -> int:
+        max_id = 0
+        for meme in self.pending_memes.values():
+            if meme.meme_id > max_id:
+                max_id = meme.meme_id
+        for entry in self.scheduled_posts:
+            meme_id = entry["meme"].get("meme_id", 0)
+            if meme_id > max_id:
+                max_id = meme_id
+        return max_id
 
     @staticmethod
     def get_next_allowed_time(dt: datetime) -> datetime:
@@ -361,7 +374,6 @@ class Scheduler:
         self.save_publication()
         self.save_moderation()
 
-        # До перезагрузки отправляем уведомление, используя сохранённый в памяти user_id
         if meme.publish_choice == "user" and meme.user_id is not None:
             time_diff = (scheduled_time - now).total_seconds()
             if time_diff < 0:
@@ -379,7 +391,7 @@ class Scheduler:
     async def run(self):
         while True:
             now = datetime.now(timezone.utc)
-            # Удаляем заявки старше 3 дней
+            # Удаляем заявки, которым больше 3 дней
             expired = []
             for mem_id, meme in list(self.pending_memes.items()):
                 if now - meme.created_time > timedelta(days=3):
@@ -474,7 +486,7 @@ async def main():
         global meme_counter
         meme_counter += 1
         chosen_mode = user_publish_choice[user_id]
-        # Всегда сохраняем user_id в памяти (для уведомлений до перезагрузки)
+        # Сохраняем user_id в памяти для уведомлений до перезагрузки
         real_user_id: Optional[int] = user_id
 
         meme = Meme(
@@ -546,7 +558,6 @@ async def main():
                     message_text = "Еще один редактор проголосовал ЗА мем!"
                 else:
                     message_text = "Еще один редактор отверг мем!"
-            # Отправляем уведомление независимо от выбранного режима
             if meme.user_id is not None:
                 await bot.send_message(meme.user_id, message_text)
         else:

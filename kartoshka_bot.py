@@ -68,9 +68,33 @@ METALS_AND_TOXINS = [
     "Калий-цианистой", "Метилртутной"
 ]
 
+# Файл для хранения глобального счетчика meme_id
+COUNTER_FILE = "meme_counter.json"
+
+def load_meme_counter() -> int:
+    try:
+        with open(COUNTER_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return int(data.get("meme_counter", 0))
+    except FileNotFoundError:
+        return 0
+    except Exception as e:
+        logging.error(f"Ошибка при загрузке счетчика meme_id: {e}")
+        return 0
+
+def save_meme_counter(counter: int):
+    data = {"meme_counter": counter}
+    try:
+        with open(COUNTER_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"Ошибка при сохранении счетчика meme_id: {e}")
+
+# Инициализируем глобальный счетчик
+meme_counter = load_meme_counter()
+
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
-# Глобальный выбор способа публикации
 user_publish_choice: Dict[int, str] = {}
 
 def serialize_message(message: Message) -> dict:
@@ -175,22 +199,6 @@ async def send_media_message(
             reply_markup=reply_markup
         )
 
-def load_votes(votes_data) -> dict:
-    """
-    Обрабатывает данные голосов. Если данные представлены списком, преобразует их в словарь.
-    Если это словарь – возвращает его, при этом для каждого идентификатора сохраняется только последнее значение.
-    """
-    result = {}
-    if isinstance(votes_data, dict):
-        for key, value in votes_data.items():
-            result[key] = value
-    elif isinstance(votes_data, list):
-        for entry in votes_data:
-            if isinstance(entry, (list, tuple)) and len(entry) == 2:
-                crypto_id, vote = entry
-                result[str(crypto_id)] = vote
-    return result
-
 class Meme:
     def __init__(
         self,
@@ -199,7 +207,7 @@ class Meme:
         publish_choice: str,
         content: AnyMessage
     ):
-        # Сохраняем user_id в оперативной памяти, чтобы до перезагрузки можно было отправлять уведомления
+        # Сохраняем user_id в оперативной памяти (для уведомлений до перезагрузки)
         self.meme_id = meme_id
         self.user_id = user_id  
         self.publish_choice = publish_choice
@@ -210,8 +218,9 @@ class Meme:
         self.created_time = datetime.now(timezone.utc)
 
     def add_vote(self, crypto_id: int, vote: str) -> Optional[str]:
-        prev_vote = self.votes.get(crypto_id)
-        self.votes[crypto_id] = vote
+        key = str(crypto_id)  # гарантируем, что ключ всегда строка
+        prev_vote = self.votes.get(key)
+        self.votes[key] = vote
         return prev_vote
 
     def count_votes(self, vote_type: str) -> int:
@@ -247,6 +256,8 @@ class Meme:
         return f"{prefix}\n\n{user_text}" if user_text else prefix
 
     def to_dict(self) -> dict:
+        # Для модерации сохраняем полную информацию, включая голоса.
+        # Для анонимных (potato) не сохраняем user_id.
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
@@ -279,7 +290,7 @@ class Meme:
             content=content
         )
         meme.created_time = datetime.fromisoformat(d["created_time"])
-        meme.votes = load_votes(d.get("votes", {}))
+        meme.votes = d.get("votes", {})
         return meme
 
 class Scheduler:
@@ -403,6 +414,7 @@ class Scheduler:
     async def run(self):
         while True:
             now = datetime.now(timezone.utc)
+            # Удаляем заявки, которым больше 3 дней
             expired = []
             for mem_id, meme in list(self.pending_memes.items()):
                 if now - meme.created_time > timedelta(days=3):
@@ -436,7 +448,7 @@ async def update_mod_messages_with_resolution(meme: Meme, resolution: str):
         try:
             await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=keyboard)
         except Exception as e:
-            logging.error(f"Ошибка при обновлении сообщения для криптоселектарха {chat_id}: {e}")
+            logging.error(f"Ошибка при обновлении сообщения для редактора {chat_id}: {e}")
 
 async def publish_meme(meme: Meme):
     try:
@@ -450,9 +462,9 @@ async def publish_meme(meme: Meme):
         logging.error(f"Ошибка при публикации: {e}")
 
 scheduler = Scheduler(POST_FREQUENCY_MINUTES)
-meme_counter = 0
 
 async def main():
+    global meme_counter
     dp = Dispatcher()
 
     @dp.message(Command("start"))
@@ -507,6 +519,7 @@ async def main():
         )
         scheduler.pending_memes[meme.meme_id] = meme
         scheduler.save_moderation()
+        save_meme_counter(meme_counter)
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
@@ -534,7 +547,7 @@ async def main():
                 )
                 meme.mod_messages.append((crypto_id, sent_msg.message_id))
             except Exception as e:
-                logging.error(f"Не удалось отправить сообщение криптоселектарху {crypto_id}: {e}")
+                logging.error(f"Не удалось отправить сообщение редактору {crypto_id}: {e}")
 
         await message.answer("Ваш мем отправлен на модерацию.")
 

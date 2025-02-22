@@ -175,6 +175,22 @@ async def send_media_message(
             reply_markup=reply_markup
         )
 
+def load_votes(votes_data) -> dict:
+    """
+    Обрабатывает данные голосов. Если данные представлены списком, преобразует их в словарь.
+    Если это словарь – возвращает его, при этом для каждого идентификатора сохраняется только последнее значение.
+    """
+    result = {}
+    if isinstance(votes_data, dict):
+        for key, value in votes_data.items():
+            result[key] = value
+    elif isinstance(votes_data, list):
+        for entry in votes_data:
+            if isinstance(entry, (list, tuple)) and len(entry) == 2:
+                crypto_id, vote = entry
+                result[str(crypto_id)] = vote
+    return result
+
 class Meme:
     def __init__(
         self,
@@ -231,8 +247,6 @@ class Meme:
         return f"{prefix}\n\n{user_text}" if user_text else prefix
 
     def to_dict(self) -> dict:
-        # Для модерационной очереди сохраняем полную информацию (включая голоса)
-        # Но для анонимных (potato) не сохраняем user_id.
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
@@ -245,7 +259,6 @@ class Meme:
         return meme_dict
 
     def to_publication_dict(self) -> dict:
-        # Для публикации сохраняем данные без голосов.
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
@@ -266,7 +279,7 @@ class Meme:
             content=content
         )
         meme.created_time = datetime.fromisoformat(d["created_time"])
-        meme.votes = d.get("votes", {})
+        meme.votes = load_votes(d.get("votes", {}))
         return meme
 
 class Scheduler:
@@ -280,7 +293,6 @@ class Scheduler:
         self.scheduled_posts = []
         self.load_moderation()
         self.load_publication()
-        # Обновляем глобальный счетчик meme_counter по максимуму из загруженных данных
         global meme_counter
         meme_counter = self.get_max_meme_id()
 
@@ -391,7 +403,6 @@ class Scheduler:
     async def run(self):
         while True:
             now = datetime.now(timezone.utc)
-            # Удаляем заявки, которым больше 3 дней
             expired = []
             for mem_id, meme in list(self.pending_memes.items()):
                 if now - meme.created_time > timedelta(days=3):
@@ -425,7 +436,7 @@ async def update_mod_messages_with_resolution(meme: Meme, resolution: str):
         try:
             await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=keyboard)
         except Exception as e:
-            logging.error(f"Ошибка при обновлении сообщения для редактора {chat_id}: {e}")
+            logging.error(f"Ошибка при обновлении сообщения для криптоселектарха {chat_id}: {e}")
 
 async def publish_meme(meme: Meme):
     try:
@@ -486,7 +497,6 @@ async def main():
         global meme_counter
         meme_counter += 1
         chosen_mode = user_publish_choice[user_id]
-        # Сохраняем user_id в памяти для уведомлений до перезагрузки
         real_user_id: Optional[int] = user_id
 
         meme = Meme(
@@ -524,7 +534,7 @@ async def main():
                 )
                 meme.mod_messages.append((crypto_id, sent_msg.message_id))
             except Exception as e:
-                logging.error(f"Не удалось отправить сообщение редактору {crypto_id}: {e}")
+                logging.error(f"Не удалось отправить сообщение криптоселектарху {crypto_id}: {e}")
 
         await message.answer("Ваш мем отправлен на модерацию.")
 
@@ -540,24 +550,23 @@ async def main():
         meme = scheduler.pending_memes[meme_id]
         crypto_id = callback.from_user.id
         prev_vote = meme.add_vote(crypto_id, action)
-        # Сохраняем обновлённое состояние голосов сразу после добавления голоса
         scheduler.save_moderation()
 
         if prev_vote is None:
             if len(meme.votes) == 1:
                 if action == "urgent":
-                    message_text = "Редактор проголосовал за срочную публикацию!"
+                    message_text = "Криптоселектарх проголосовал за срочную публикацию!"
                 elif action == "approve":
-                    message_text = "Редактор проголосовал ЗА мем!"
+                    message_text = "Криптоселектарх проголосовал ЗА мем!"
                 else:
-                    message_text = "Редактор отверг мем!"
+                    message_text = "Криптоселектарх отверг мем!"
             else:
                 if action == "urgent":
-                    message_text = "Еще один редактор проголосовал за срочную публикацию!"
+                    message_text = "Еще один криптоселектарх проголосовал за срочную публикацию!"
                 elif action == "approve":
-                    message_text = "Еще один редактор проголосовал ЗА мем!"
+                    message_text = "Еще один криптоселектарх проголосовал ЗА мем!"
                 else:
-                    message_text = "Еще один редактор отверг мем!"
+                    message_text = "Еще один криптоселектарх отверг мем!"
             if meme.user_id is not None:
                 await bot.send_message(meme.user_id, message_text)
         else:
@@ -568,11 +577,10 @@ async def main():
             else:
                 new_vote_text = "отказ от публикации!"
             if meme.user_id is not None:
-                await bot.send_message(meme.user_id, f"Редактор изменил мнение. Новое решение: {new_vote_text}")
+                await bot.send_message(meme.user_id, f"Криптоселектарх изменил мнение. Новое решение: {new_vote_text}")
 
         await callback.answer("Ваш голос учтен.", show_alert=False)
 
-        # --- Единоличный режим (CRYPTOSELECTARCHY=False) ---
         if not CRYPTOSELECTARCHY:
             if action in ("approve", "urgent"):
                 if action == "urgent":
@@ -596,7 +604,6 @@ async def main():
             scheduler.save_moderation()
             return
 
-        # --- Многоголосие (CRYPTOSELECTARCHY=True) ---
         if meme.is_approved() and not meme.finalized:
             if meme.is_urgent():
                 resolution = "⚡ Одобрен срочно"

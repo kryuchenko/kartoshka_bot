@@ -101,21 +101,41 @@ user_publish_choice: Dict[int, str] = {}
 def serialize_message(message: Message) -> dict:
     data = {"content_type": message.content_type}
     if message.content_type == "text":
-        data["text"] = message.text
+        data["text"] = getattr(message, "text", "")
     elif message.content_type == "photo":
-        data["photo"] = [{"file_id": photo.file_id} for photo in message.photo]
-        data["caption"] = message.caption
+        # Handle None photo case
+        photo_list = getattr(message, "photo", None)
+        if photo_list is None:
+            data["photo"] = []
+        else:
+            try:
+                data["photo"] = [{"file_id": photo.file_id} for photo in photo_list]
+            except (AttributeError, TypeError):
+                data["photo"] = []
+        data["caption"] = getattr(message, "caption", None)
     elif message.content_type == "video":
-        data["video"] = {"file_id": message.video.file_id}
-        data["caption"] = message.caption
+        try:
+            data["video"] = {"file_id": getattr(message.video, "file_id", "")}
+        except AttributeError:
+            data["video"] = {"file_id": ""}
+        data["caption"] = getattr(message, "caption", None)
     elif message.content_type == "animation":
-        data["animation"] = {"file_id": message.animation.file_id}
-        data["caption"] = message.caption
+        try:
+            data["animation"] = {"file_id": getattr(message.animation, "file_id", "")}
+        except AttributeError:
+            data["animation"] = {"file_id": ""}
+        data["caption"] = getattr(message, "caption", None) 
     elif message.content_type == "voice":
-        data["voice"] = {"file_id": message.voice.file_id}
-        data["caption"] = message.caption
+        try:
+            data["voice"] = {"file_id": getattr(message.voice, "file_id", "")}
+        except AttributeError:
+            data["voice"] = {"file_id": ""}
+        data["caption"] = getattr(message, "caption", None)
     elif message.content_type == "video_note":
-        data["video_note"] = {"file_id": message.video_note.file_id}
+        try:
+            data["video_note"] = {"file_id": getattr(message.video_note, "file_id", "")}
+        except AttributeError:
+            data["video_note"] = {"file_id": ""}
     else:
         data["text"] = getattr(message, "text", "")
     return data
@@ -124,21 +144,63 @@ class DummyMessage:
     def __init__(self, data: dict):
         self.content_type = data["content_type"]
         if self.content_type == "text":
-            self.text = data["text"]
+            self.text = data.get("text", "")
         elif self.content_type == "photo":
-            self.photo = [SimpleNamespace(**photo) for photo in data.get("photo", [])]
+            photo_data = data.get("photo")
+            if photo_data is None:
+                self.photo = []
+            else:
+                try:
+                    self.photo = [SimpleNamespace(**photo) for photo in photo_data]
+                except (TypeError, AttributeError):
+                    self.photo = []
             self.caption = data.get("caption")
         elif self.content_type == "video":
-            self.video = SimpleNamespace(**data.get("video"))
+            video_data = data.get("video")
+            if video_data is None:
+                self.video = SimpleNamespace(file_id="")
+            else:
+                try:
+                    self.video = SimpleNamespace(**video_data)
+                except (TypeError, AttributeError):
+                    self.video = SimpleNamespace(file_id="") 
             self.caption = data.get("caption")
         elif self.content_type == "animation":
-            self.animation = SimpleNamespace(**data.get("animation"))
+            animation_data = data.get("animation")
+            if animation_data is None:
+                self.animation = SimpleNamespace(file_id="")
+            else:
+                try:
+                    self.animation = SimpleNamespace(**animation_data)
+                except (TypeError, AttributeError):
+                    self.animation = SimpleNamespace(file_id="")
             self.caption = data.get("caption")
         elif self.content_type == "voice":
-            self.voice = SimpleNamespace(**data.get("voice"))
+            voice_data = data.get("voice")
+            if voice_data is None:
+                self.voice = SimpleNamespace(file_id="")
+            else:
+                try:
+                    self.voice = SimpleNamespace(**voice_data)
+                except (TypeError, AttributeError):
+                    self.voice = SimpleNamespace(file_id="")
             self.caption = data.get("caption")
         elif self.content_type == "video_note":
-            self.video_note = SimpleNamespace(**data.get("video_note"))
+            video_note_data = data.get("video_note")
+            if video_note_data is None:
+                self.video_note = SimpleNamespace(file_id="")
+            else:
+                try:
+                    # Process nested structures like thumb
+                    processed_data = {}
+                    for key, value in video_note_data.items():
+                        if isinstance(value, dict):
+                            processed_data[key] = SimpleNamespace(**value)
+                        else:
+                            processed_data[key] = value
+                    self.video_note = SimpleNamespace(**processed_data)
+                except (TypeError, AttributeError):
+                    self.video_note = SimpleNamespace(file_id="")
         else:
             self.text = data.get("text", "")
 
@@ -193,10 +255,10 @@ async def send_media_message(
             reply_markup=reply_markup
         )
     else:
-        text = getattr(content, "text", "")
+        # Всегда используем caption для текстовых сообщений, а не только text
         return await telegram_bot.send_message(
             chat_id=chat_id,
-            text=text if text else caption,
+            text=caption,
             reply_markup=reply_markup
         )
 
@@ -215,6 +277,7 @@ class Meme:
         self.content = content
         self.votes = {}
         self.mod_messages = []
+        self.user_messages = []  # Список сообщений пользователя для обновления
         self.finalized = False
         self.created_time = datetime.now(timezone.utc)
 
@@ -254,7 +317,9 @@ class Meme:
             random_metal = random.choice(METALS_AND_TOXINS)
             plain_prefix = f"Мем от Анонимной {random_metal} Картошки"
             prefix = f"<tg-spoiler>{plain_prefix}</tg-spoiler>"
-        return f"{prefix}\n\n{user_text}" if user_text else prefix
+        
+        # Всегда возвращаем подпись с префиксом, даже если пользовательский текст пустой
+        return f"{prefix}\n\n{user_text}" if user_text else f"{prefix}"
 
     def to_dict(self) -> dict:
         # Для модерации сохраняем полную информацию, включая голоса.
@@ -405,12 +470,29 @@ class Scheduler:
             hours = int(time_diff // 3600)
             minutes_left = int((time_diff % 3600) // 60)
             time_left_str = f"{hours} ч. {minutes_left} мин." if hours > 0 else f"{minutes_left} мин."
-            await bot.send_message(
-                meme.user_id,
-                f"Ваш мем одобрен и теперь ждёт публикации.\n\n"
-                f"Ориентировочное время публикации: {scheduled_time.strftime('%H:%M')} по UTC\n"
-                f"(через {time_left_str})."
-            )
+            
+            # Если есть пользовательский виджет, обновляем его с информацией о запланированной публикации
+            if meme.user_messages:
+                keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(
+                        text=f"✅ Одобрен {meme.get_vote_summary()} • Публикация: {scheduled_time.strftime('%H:%M')} UTC (через {time_left_str})", 
+                        callback_data="noop"
+                    )]
+                ])
+                
+                for chat_id, message_id in meme.user_messages:
+                    try:
+                        await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=keyboard)
+                    except Exception as e:
+                        logging.error(f"Ошибка при обновлении сообщения для пользователя {chat_id}: {e}")
+            # Если нет виджета, отправляем обычное сообщение
+            else:
+                await bot.send_message(
+                    meme.user_id,
+                    f"Ваш мем одобрен и теперь ждёт публикации.\n\n"
+                    f"Ориентировочное время публикации: {scheduled_time.strftime('%H:%M')} по UTC\n"
+                    f"(через {time_left_str})."
+                )
 
     async def run(self):
         while True:
@@ -451,13 +533,39 @@ async def update_mod_messages_with_resolution(meme: Meme, resolution: str):
         except Exception as e:
             logging.error(f"Ошибка при обновлении сообщения для редактора {chat_id}: {e}")
 
+async def update_user_messages_with_status(meme: Meme, final_resolution: str = None):
+    """Обновляет сообщения пользователя с текущей статистикой голосования"""
+    if meme.user_id is None or not meme.user_messages:
+        return  # Если нет пользователя или его сообщений, ничего не делаем
+    
+    vote_summary = meme.get_vote_summary()
+    
+    # Если голосование завершено, показываем финальное решение
+    if final_resolution:
+        status_text = f"{final_resolution} {vote_summary}"
+    else:
+        # Иначе показываем текущую статистику
+        status_text = f"Голосование: {vote_summary}"
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=status_text, callback_data="noop")]
+    ])
+    
+    for chat_id, message_id in meme.user_messages:
+        try:
+            await bot.edit_message_reply_markup(chat_id=chat_id, message_id=message_id, reply_markup=keyboard)
+        except Exception as e:
+            logging.error(f"Ошибка при обновлении сообщения для пользователя {chat_id}: {e}")
+
 async def publish_meme(meme: Meme):
     try:
+        # Всегда передаем caption явно для правильной подписи
+        caption = meme.get_caption()
         await send_media_message(
             telegram_bot=bot,
             chat_id=PUBLISH_CHAT_ID,
             content=meme.content,
-            caption=meme.get_caption()
+            caption=caption
         )
     except Exception as e:
         logging.error(f"Ошибка при публикации: {e}")
@@ -559,7 +667,15 @@ async def main():
             except Exception as e:
                 logging.error(f"Не удалось отправить сообщение редактору {crypto_id}: {e}")
 
-        await message.answer("Ваш мем отправлен на модерацию.")
+        # Отправляем пользователю сообщение с начальной статистикой и сохраняем его для обновления
+        user_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"Голосование: {meme.get_vote_summary()}", callback_data="noop")]
+        ])
+        user_msg = await message.answer("Ваш мем отправлен на модерацию.", reply_markup=user_keyboard)
+        
+        # Сохраняем сообщение пользователя для обновления
+        if meme.user_id is not None:
+            meme.user_messages.append((meme.user_id, user_msg.message_id))
 
     @dp.callback_query(F.data.startswith(("approve_", "urgent_", "reject_")))
     async def crypto_callback(callback: CallbackQuery):
@@ -575,37 +691,8 @@ async def main():
         prev_vote = meme.add_vote(crypto_id, action)
         scheduler.save_moderation()
 
-        # Новая логика: уведомляем только при первом голосе или при реальном изменении решения
-        if prev_vote is None:
-            if len(meme.votes) == 1:
-                if action == "urgent":
-                    message_text = "Криптоселектарх проголосовал за срочную публикацию!"
-                elif action == "approve":
-                    message_text = "Криптоселектарх проголосовал ЗА мем!"
-                else:
-                    message_text = "Криптоселектарх отверг мем!"
-            else:
-                if action == "urgent":
-                    message_text = "Еще один криптоселектарх проголосовал за срочную публикацию!"
-                elif action == "approve":
-                    message_text = "Еще один криптоселектарх проголосовал ЗА мем!"
-                else:
-                    message_text = "Еще один криптоселектарх отверг мем!"
-            if meme.user_id is not None:
-                await bot.send_message(meme.user_id, message_text)
-        else:
-            if prev_vote == action:
-                # Повторное нажатие той же кнопки – уведомлений не отправляем.
-                pass
-            else:
-                if action == "urgent":
-                    new_vote_text = "срочную публикацию!"
-                elif action == "approve":
-                    new_vote_text = "ЗА мем!"
-                else:
-                    new_vote_text = "отказ от публикации!"
-                if meme.user_id is not None:
-                    await bot.send_message(meme.user_id, f"Криптоселектарх изменил мнение. Новое решение: {new_vote_text}")
+        # Вместо отправки множества сообщений, обновляем виджет статистики голосов у пользователя
+        await update_user_messages_with_status(meme)
 
         await callback.answer("Ваш голос учтен.", show_alert=False)
 
@@ -614,17 +701,17 @@ async def main():
                 if action == "urgent":
                     resolution = "⚡ Одобрен срочно"
                     await publish_meme(meme)
-                    if meme.user_id is not None:
-                        await bot.send_message(meme.user_id, "Ваш мем одобрен срочно и опубликован!")
+                    # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
+                    await update_user_messages_with_status(meme, "⚡ Одобрен срочно")
                 else:
                     resolution = "✅ Одобрен"
                     await scheduler.schedule(meme)
-                    if meme.user_id is not None:
-                        await bot.send_message(meme.user_id, "Ваш мем одобрен и будет опубликован.")
+                    # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
+                    await update_user_messages_with_status(meme, "✅ Одобрен")
             else:
                 resolution = "❌ Отклонён"
-                if meme.user_id is not None:
-                    await bot.send_message(meme.user_id, "Мем отклонён Единоличным Узурпатором.")
+                # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
+                await update_user_messages_with_status(meme, "❌ Отклонён")
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
             await update_mod_messages_with_resolution(meme, resolution_with_summary)
@@ -636,13 +723,13 @@ async def main():
             if meme.is_urgent():
                 resolution = "⚡ Одобрен срочно"
                 await publish_meme(meme)
-                if meme.user_id is not None:
-                    await bot.send_message(meme.user_id, "Ваш мем одобрен срочно и опубликован!")
+                # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
+                await update_user_messages_with_status(meme, "⚡ Одобрен срочно")
             else:
                 resolution = "✅ Одобрен"
                 await scheduler.schedule(meme)
-                if meme.user_id is not None:
-                    await bot.send_message(meme.user_id, "Ваш мем одобрен и будет опубликован.")
+                # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
+                await update_user_messages_with_status(meme, "✅ Одобрен")
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
             await update_mod_messages_with_resolution(meme, resolution_with_summary)
@@ -652,8 +739,8 @@ async def main():
 
         if meme.is_rejected() and not meme.finalized:
             resolution = "❌ Отклонён"
-            if meme.user_id is not None:
-                await bot.send_message(meme.user_id, "Мем набрал слишком много голосов ПРОТИВ и отклонён.")
+            # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
+            await update_user_messages_with_status(meme, "❌ Отклонён")
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
             await update_mod_messages_with_resolution(meme, resolution_with_summary)

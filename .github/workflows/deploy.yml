@@ -1,9 +1,10 @@
-# .github/workflows/deploy.yml
 name: Deploy Kartoshka Bot
 
+# Триггеры: ручной и по пушу в main (можно оставить только workflow_dispatch)
 on:
+  workflow_dispatch:     # ручной запуск из UI
   push:
-    branches: [ main ]
+    branches: [ main ]   # (если нужно по-прежнему автоматом)
 
 jobs:
   deploy:
@@ -13,7 +14,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.8.1
+        uses: webfactory/ssh-agent@v0.8.0
         with:
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
 
@@ -24,16 +25,12 @@ jobs:
 
       - name: Deploy via SSH
         run: |
-          ssh -o StrictHostKeyChecking=yes ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          ssh -o StrictHostKeyChecking=yes \
+            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
             set -e
-
-            # Перейти в директорию проекта
             cd ~/projects/kartoshka_bot
-
-            # Обновить код
             git pull origin main
 
-            # Перезаписать .env из секретов
             cat > .env << EOT
             BOT_TOKEN=${{ secrets.BOT_TOKEN }}
             EDITOR_IDS=${{ secrets.EDITOR_IDS }}
@@ -45,16 +42,13 @@ jobs:
             VOTES_TO_REJECT=${{ secrets.VOTES_TO_REJECT }}
             EOT
 
-            # Перезапустить сервис
             sudo systemctl restart kartoshka_bot.service
 
-            # Проверить, что сервис запущен
             if ! sudo systemctl is-active --quiet kartoshka_bot.service; then
-              echo "✖ kartoshka_bot.service failed to start!" >&2
-              echo "Последние 50 строк журнала:" >&2
+              echo "✖ Service failed to start" >&2
               sudo journalctl -u kartoshka_bot.service --no-pager -n 50 >&2
               exit 1
             fi
 
-            echo "✔ kartoshka_bot.service is running."
+            echo "✔ Service is running."
           EOF

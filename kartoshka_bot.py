@@ -475,7 +475,7 @@ class Scheduler:
             if meme.user_messages:
                 keyboard = InlineKeyboardMarkup(inline_keyboard=[
                     [InlineKeyboardButton(
-                        text=f"✅ Одобрен {meme.get_vote_summary()} • Публикация: {scheduled_time.strftime('%H:%M')} UTC (через {time_left_str})", 
+                        text=f"✅ Одбр. {meme.get_vote_summary()} • Публ: {scheduled_time.strftime('%H:%M')} UTC ({time_left_str})", 
                         callback_data="noop"
                     )]
                 ])
@@ -632,9 +632,9 @@ async def main():
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
-                InlineKeyboardButton(text="✅Одобр.", callback_data=f"approve_{meme.meme_id}"),
-                InlineKeyboardButton(text="⚡Срочно⚡", callback_data=f"urgent_{meme.meme_id}"),
-                InlineKeyboardButton(text="❌Отклонить", callback_data=f"reject_{meme.meme_id}")
+                InlineKeyboardButton(text="✅Одбр.", callback_data=f"approve_{meme.meme_id}"),
+                InlineKeyboardButton(text="⚡Срч.", callback_data=f"urgent_{meme.meme_id}"),
+                InlineKeyboardButton(text="❌Отк.", callback_data=f"reject_{meme.meme_id}")
             ]
         ])
 
@@ -699,19 +699,19 @@ async def main():
         if not CRYPTOSELECTARCHY:
             if action in ("approve", "urgent"):
                 if action == "urgent":
-                    resolution = "⚡ Одобрен срочно"
+                    resolution = "⚡ Одбр.срч."
                     await publish_meme(meme)
                     # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
-                    await update_user_messages_with_status(meme, "⚡ Одобрен срочно")
+                    await update_user_messages_with_status(meme, "⚡ Одбр.срч.")
                 else:
-                    resolution = "✅ Одобрен"
+                    resolution = "✅ Одбр."
                     await scheduler.schedule(meme)
                     # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
-                    await update_user_messages_with_status(meme, "✅ Одобрен")
+                    await update_user_messages_with_status(meme, "✅ Одбр.")
             else:
-                resolution = "❌ Отклонён"
+                resolution = "❌ Отк."
                 # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
-                await update_user_messages_with_status(meme, "❌ Отклонён")
+                await update_user_messages_with_status(meme, "❌ Отк.")
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
             await update_mod_messages_with_resolution(meme, resolution_with_summary)
@@ -721,15 +721,15 @@ async def main():
 
         if meme.is_approved() and not meme.finalized:
             if meme.is_urgent():
-                resolution = "⚡ Одобрен срочно"
+                resolution = "⚡ Одбр.срч."
                 await publish_meme(meme)
                 # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
-                await update_user_messages_with_status(meme, "⚡ Одобрен срочно")
+                await update_user_messages_with_status(meme, "⚡ Одбр.срч.")
             else:
-                resolution = "✅ Одобрен"
+                resolution = "✅ Одбр."
                 await scheduler.schedule(meme)
                 # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
-                await update_user_messages_with_status(meme, "✅ Одобрен")
+                await update_user_messages_with_status(meme, "✅ Одбр.")
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
             await update_mod_messages_with_resolution(meme, resolution_with_summary)
@@ -738,9 +738,9 @@ async def main():
             return
 
         if meme.is_rejected() and not meme.finalized:
-            resolution = "❌ Отклонён"
+            resolution = "❌ Отк."
             # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
-            await update_user_messages_with_status(meme, "❌ Отклонён")
+            await update_user_messages_with_status(meme, "❌ Отк.")
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
             await update_mod_messages_with_resolution(meme, resolution_with_summary)

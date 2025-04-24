@@ -1,10 +1,10 @@
+# .github/workflows/deploy.yml
 name: Deploy Kartoshka Bot
 
-# Триггеры: ручной и по пушу в main (можно оставить только workflow_dispatch)
 on:
-  workflow_dispatch:     # ручной запуск из UI
+  workflow_dispatch:    # ручной запуск из GitHub UI
   push:
-    branches: [ main ]   # (если нужно по-прежнему автоматом)
+    branches: [ main ]  # или уберите эту строку, если нужен только ручной запуск
 
 jobs:
   deploy:
@@ -25,30 +25,31 @@ jobs:
 
       - name: Deploy via SSH
         run: |
-          ssh -o StrictHostKeyChecking=yes \
-            ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
-            set -e
-            cd ~/projects/kartoshka_bot
-            git pull origin main
+          ssh -o StrictHostKeyChecking=yes ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          set -e
+          cd ~/projects/kartoshka_bot
 
-            cat > .env << EOT
-            BOT_TOKEN=${{ secrets.BOT_TOKEN }}
-            EDITOR_IDS=${{ secrets.EDITOR_IDS }}
-            PUBLISH_CHAT_ID=${{ secrets.PUBLISH_CHAT_ID }}
-            BOT_NAME="${{ secrets.BOT_NAME }}"
-            POST_FREQUENCY_MINUTES=${{ secrets.POST_FREQUENCY_MINUTES }}
-            CRYPTOSELECTARCHY=${{ secrets.CRYPTOSELECTARCHY }}
-            VOTES_TO_APPROVE=${{ secrets.VOTES_TO_APPROVE }}
-            VOTES_TO_REJECT=${{ secrets.VOTES_TO_REJECT }}
-            EOT
+          git pull origin main
 
-            sudo systemctl restart kartoshka_bot.service
+          # Перезаписываем .env (закрывающий маркер EOT без отступов!)
+          cat > .env << 'EOT'
+BOT_TOKEN=${{ secrets.BOT_TOKEN }}
+EDITOR_IDS=${{ secrets.EDITOR_IDS }}
+PUBLISH_CHAT_ID=${{ secrets.PUBLISH_CHAT_ID }}
+BOT_NAME="${{ secrets.BOT_NAME }}"
+POST_FREQUENCY_MINUTES=${{ secrets.POST_FREQUENCY_MINUTES }}
+CRYPTOSELECTARCHY=${{ secrets.CRYPTOSELECTARCHY }}
+VOTES_TO_APPROVE=${{ secrets.VOTES_TO_APPROVE }}
+VOTES_TO_REJECT=${{ secrets.VOTES_TO_REJECT }}
+EOT
 
-            if ! sudo systemctl is-active --quiet kartoshka_bot.service; then
-              echo "✖ Service failed to start" >&2
-              sudo journalctl -u kartoshka_bot.service --no-pager -n 50 >&2
-              exit 1
-            fi
+          sudo systemctl restart kartoshka_bot.service
 
-            echo "✔ Service is running."
+          if ! sudo systemctl is-active --quiet kartoshka_bot.service; then
+            echo "✖ kartoshka_bot.service failed to start!" >&2
+            sudo journalctl -u kartoshka_bot.service --no-pager -n 50 >&2
+            exit 1
+          fi
+
+          echo "✔ kartoshka_bot.service is running."
           EOF

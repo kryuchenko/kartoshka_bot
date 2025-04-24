@@ -557,6 +557,32 @@ async def update_user_messages_with_status(meme: Meme, final_resolution: str = N
         except Exception as e:
             logging.error(f"Ошибка при обновлении сообщения для пользователя {chat_id}: {e}")
 
+def build_mod_keyboard(meme: Meme, mod_id: int) -> InlineKeyboardMarkup:
+    """
+    Составляет InlineKeyboardMarkup для модератора mod_id,
+    подсвечивая его текущий выбор.
+    """
+    # Получаем, за что уже проголосовал этот модератор
+    vote = meme.votes.get(str(mod_id))
+    # Пары (action, label)
+    actions = [
+        ("approve", "✅Одбр."),
+        ("urgent",  "⚡Срч."),
+        ("reject",  "❌Отк.")
+    ]
+    buttons = []
+    for action_key, label in actions:
+        # Если это кнопка, за которую уже проголосовал, добавляем стрелку
+        if vote == action_key:
+            text = f"➤ {label}"
+        else:
+            text = label
+        buttons.append(
+            InlineKeyboardButton(text=text, callback_data=f"{action_key}_{meme.meme_id}")
+        )
+    # Клавиатура из одной строки
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
 async def publish_meme(meme: Meme):
     try:
         # Всегда передаем caption явно для правильной подписи
@@ -630,6 +656,7 @@ async def main():
         scheduler.save_moderation()
         save_meme_counter(meme_counter)
 
+        # Создаем начальную клавиатуру для каждого модератора без выделения
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [
                 InlineKeyboardButton(text="✅Одбр.", callback_data=f"approve_{meme.meme_id}"),
@@ -694,7 +721,16 @@ async def main():
         # Вместо отправки множества сообщений, обновляем виджет статистики голосов у пользователя
         await update_user_messages_with_status(meme)
 
+        # Подтверждаем самому модератору
         await callback.answer("Ваш голос учтен.", show_alert=False)
+        
+        # --- Обновляем клавиатуру в этом сообщении модератора ---
+        new_kb = build_mod_keyboard(meme, crypto_id)
+        await bot.edit_message_reply_markup(
+            chat_id=callback.message.chat.id,
+            message_id=callback.message.message_id,
+            reply_markup=new_kb
+        )
 
         if not CRYPTOSELECTARCHY:
             if action in ("approve", "urgent"):

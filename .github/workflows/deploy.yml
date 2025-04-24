@@ -1,9 +1,7 @@
 name: Deploy Kartoshka Bot
 
 on:
-  workflow_dispatch:    # ручной запуск
-  push:
-    branches: [main]    # автомат при пуше в main (опционально)
+  workflow_dispatch:    # ручной запуск из GitHub UI
 
 jobs:
   deploy:
@@ -24,13 +22,16 @@ jobs:
 
       - name: Deploy via SSH
         run: |
-          ssh -o StrictHostKeyChecking=yes ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          ssh -q -o StrictHostKeyChecking=yes ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
           set -e
-          cd ~/projects/kartoshka_bot
 
+          # Отключаем MOTD
+          touch ~/.hushlogin || true
+
+          cd ~/projects/kartoshka_bot
           git pull origin main
 
-          # Перезаписываем .env — маркер 'EOT' без отступов слева
+          # Перезаписываем .env — маркер 'EOT' без отступов
           cat > .env << 'EOT'
           BOT_TOKEN=${{ secrets.BOT_TOKEN }}
           EDITOR_IDS=${{ secrets.EDITOR_IDS }}

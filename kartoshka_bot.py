@@ -533,6 +533,25 @@ async def update_mod_messages_with_resolution(meme: Meme, resolution: str):
         except Exception as e:
             logging.error(f"Ошибка при обновлении сообщения для редактора {chat_id}: {e}")
 
+def build_mod_keyboard(meme: Meme, mod_id: int) -> InlineKeyboardMarkup:
+    """
+    Клавиатура для модератора mod_id:
+    выбранная им кнопка отображается с «➤».
+    """
+    vote = meme.votes.get(str(mod_id))
+    actions = [
+        ("approve", "✅Одбр."),
+        ("urgent",  "⚡Срч."),
+        ("reject",  "❌Отк.")
+    ]
+    buttons = []
+    for action_key, label in actions:
+        text = f"➤ {label}" if vote == action_key else label
+        buttons.append(
+            InlineKeyboardButton(text=text, callback_data=f"{action_key}_{meme.meme_id}")
+        )
+    return InlineKeyboardMarkup(inline_keyboard=[buttons])
+
 async def update_user_messages_with_status(meme: Meme, final_resolution: str = None):
     """Обновляет сообщения пользователя с текущей статистикой голосования"""
     if meme.user_id is None or not meme.user_messages:
@@ -557,31 +576,6 @@ async def update_user_messages_with_status(meme: Meme, final_resolution: str = N
         except Exception as e:
             logging.error(f"Ошибка при обновлении сообщения для пользователя {chat_id}: {e}")
 
-def build_mod_keyboard(meme: Meme, mod_id: int) -> InlineKeyboardMarkup:
-    """
-    Составляет InlineKeyboardMarkup для модератора mod_id,
-    подсвечивая его текущий выбор.
-    """
-    # Получаем, за что уже проголосовал этот модератор
-    vote = meme.votes.get(str(mod_id))
-    # Пары (action, label)
-    actions = [
-        ("approve", "✅Одбр."),
-        ("urgent",  "⚡Срч."),
-        ("reject",  "❌Отк.")
-    ]
-    buttons = []
-    for action_key, label in actions:
-        # Если это кнопка, за которую уже проголосовал, добавляем стрелку
-        if vote == action_key:
-            text = f"➤ {label}"
-        else:
-            text = label
-        buttons.append(
-            InlineKeyboardButton(text=text, callback_data=f"{action_key}_{meme.meme_id}")
-        )
-    # Клавиатура из одной строки
-    return InlineKeyboardMarkup(inline_keyboard=[buttons])
 
 async def publish_meme(meme: Meme):
     try:
@@ -724,7 +718,7 @@ async def main():
         # Подтверждаем самому модератору
         await callback.answer("Ваш голос учтен.", show_alert=False)
         
-        # --- Обновляем клавиатуру в этом сообщении модератора ---
+        # — обновляем клавиатуру только для этого модератора —
         new_kb = build_mod_keyboard(meme, crypto_id)
         await bot.edit_message_reply_markup(
             chat_id=callback.message.chat.id,

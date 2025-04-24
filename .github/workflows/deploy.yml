@@ -1,10 +1,9 @@
-# .github/workflows/deploy.yml
 name: Deploy Kartoshka Bot
 
 on:
   workflow_dispatch:    # ручной запуск
   push:
-    branches: [ main ]  # (по желанию можно убрать)
+    branches: [main]    # автомат при пуше в main (опционально)
 
 jobs:
   deploy:
@@ -31,7 +30,7 @@ jobs:
 
           git pull origin main
 
-          # Перезаписываем .env: маркер 'EOT' без отступов в начале строки!
+          # Перезаписываем .env — маркер 'EOT' без отступов слева
           cat > .env << 'EOT'
           BOT_TOKEN=${{ secrets.BOT_TOKEN }}
           EDITOR_IDS=${{ secrets.EDITOR_IDS }}
@@ -41,7 +40,7 @@ jobs:
           CRYPTOSELECTARCHY=${{ secrets.CRYPTOSELECTARCHY }}
           VOTES_TO_APPROVE=${{ secrets.VOTES_TO_APPROVE }}
           VOTES_TO_REJECT=${{ secrets.VOTES_TO_REJECT }}
-EOT
+          EOT
 
           sudo systemctl restart kartoshka_bot.service
 

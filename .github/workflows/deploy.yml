@@ -2,9 +2,9 @@
 name: Deploy Kartoshka Bot
 
 on:
-  workflow_dispatch:    # ручной запуск из GitHub UI
+  workflow_dispatch:    # ручной запуск
   push:
-    branches: [ main ]  # или уберите эту строку, если нужен только ручной запуск
+    branches: [ main ]  # (по желанию можно убрать)
 
 jobs:
   deploy:
@@ -31,16 +31,16 @@ jobs:
 
           git pull origin main
 
-          # Перезаписываем .env (закрывающий маркер EOT без отступов!)
+          # Перезаписываем .env: маркер 'EOT' без отступов в начале строки!
           cat > .env << 'EOT'
-BOT_TOKEN=${{ secrets.BOT_TOKEN }}
-EDITOR_IDS=${{ secrets.EDITOR_IDS }}
-PUBLISH_CHAT_ID=${{ secrets.PUBLISH_CHAT_ID }}
-BOT_NAME="${{ secrets.BOT_NAME }}"
-POST_FREQUENCY_MINUTES=${{ secrets.POST_FREQUENCY_MINUTES }}
-CRYPTOSELECTARCHY=${{ secrets.CRYPTOSELECTARCHY }}
-VOTES_TO_APPROVE=${{ secrets.VOTES_TO_APPROVE }}
-VOTES_TO_REJECT=${{ secrets.VOTES_TO_REJECT }}
+          BOT_TOKEN=${{ secrets.BOT_TOKEN }}
+          EDITOR_IDS=${{ secrets.EDITOR_IDS }}
+          PUBLISH_CHAT_ID=${{ secrets.PUBLISH_CHAT_ID }}
+          BOT_NAME="${{ secrets.BOT_NAME }}"
+          POST_FREQUENCY_MINUTES=${{ secrets.POST_FREQUENCY_MINUTES }}
+          CRYPTOSELECTARCHY=${{ secrets.CRYPTOSELECTARCHY }}
+          VOTES_TO_APPROVE=${{ secrets.VOTES_TO_APPROVE }}
+          VOTES_TO_REJECT=${{ secrets.VOTES_TO_REJECT }}
 EOT
 
           sudo systemctl restart kartoshka_bot.service

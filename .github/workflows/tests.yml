@@ -47,50 +47,42 @@ jobs:
     # 5. Запуск всех тестов с покрытием
     - name: Run tests with coverage
       run: |
+        # Запуск всех тестов, включая тесты системы отклонений
         pytest -v \
           --cov=kartoshka_bot \
           --cov-report=term-missing:skip-covered \
           --cov-report=xml \
           --cov-report=html
         
-    # 6. Проверка работы системы отклонений и бана пользователей
-    - name: Verify rejection tracking and ban functionality
-      run: |
-        echo "➡️ Проверка системы отклонений и блокировки пользователей"
-        if pytest -v tests/test_user_rejection.py::TestUserRejectionTracking::test_multiple_rejections_counting; then
-          echo "✅ Система отклонений и бана работает корректно"
-          echo "   - Счетчик отклонений увеличивается при отклонении мема"
-          echo "   - Счетчик сбрасывается при одобрении мема"
-          echo "   - Бан снимается при одобрении мема"
-        else
-          echo "❌ Ошибка в системе отклонений и бана"
-          echo "   - Проверьте увеличение/сброс счетчика отклонений"
-          echo "   - Проверьте корректность снятия бана"
-          exit 1
-        fi
+        # Выведем дополнительную информацию о важных функциях
+        echo "➡️ Тесты системы отклонений и блокировки пользователей запущены"
+        echo "✅ Проверены следующие функции:"
+        echo "   - Счетчик отклонений увеличивается при отклонении мема"
+        echo "   - Счетчик сбрасывается при одобрении мема"
+        echo "   - Бан снимается при одобрении мема"
 
-    # 7. Загружаем HTML‑отчёт как artefact
+    # 6. Загружаем HTML‑отчёт как artefact
     - name: Upload HTML coverage report
       uses: actions/upload-artifact@v4
       with:
         name: coverage-html
         path: htmlcov/
 
-    # 8. Создаём/обновляем coverage.svg
+    # 7. Создаём/обновляем coverage.svg
     - name: Create coverage.svg badge
       id: badge
       uses: tj-actions/coverage-badge-py@v2       # живой экшен
       with:
         output: coverage.svg
 
-    # 9. Проверяем, изменился ли бейдж
+    # 8. Проверяем, изменился ли бейдж
     - name: Verify badge changed
       id: verify
       uses: tj-actions/verify-changed-files@v16
       with:
         files: coverage.svg
 
-    # 10. Коммитим и пушим в main, только если файл обновился
+    # 9. Коммитим и пушим в main, только если файл обновился
     - name: Commit and push badge
       if: steps.verify.outputs.files_changed == 'true' && github.ref == 'refs/heads/main'
       run: |
@@ -102,7 +94,7 @@ jobs:
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # 11. Вычисляем процент покрытия для комментария
+    # 10. Вычисляем процент покрытия для комментария
     - name: Extract coverage %
       id: cov
       run: |
@@ -113,7 +105,7 @@ jobs:
             fh.write(f"pct={pct}\n")
         PY
 
-    # 12. Комментарий в PR (sticky — обновляет, а не плодит)
+    # 11. Комментарий в PR (sticky — обновляет, а не плодит)
     - name: PR comment with coverage
       if: github.event_name == 'pull_request'
       uses: marocchino/sticky-pull-request-comment@v2

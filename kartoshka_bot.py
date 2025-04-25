@@ -96,7 +96,16 @@ def save_meme_counter(counter: int):
 def load_user_data() -> Dict[str, Dict[str, Any]]:
     try:
         with open(USER_DATA_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
+            raw = json.load(f)
+        
+        # Преобразуем строки ISO в объекты datetime
+        data = {}
+        for uid, ud in raw.items():
+            data[uid] = {
+                "last_submission": datetime.fromisoformat(ud["last_submission"]) if ud.get("last_submission") else None,
+                "rejections": ud.get("rejections", 0),
+                "ban_until": datetime.fromisoformat(ud["ban_until"]) if ud.get("ban_until") else None
+            }
         return data
     except FileNotFoundError:
         return {}
@@ -106,8 +115,17 @@ def load_user_data() -> Dict[str, Dict[str, Any]]:
 
 def save_user_data(data: Dict[str, Dict[str, Any]]):
     try:
+        # Преобразуем объекты datetime в строки ISO для сохранения
+        serialized_data = {}
+        for uid, ud in data.items():
+            serialized_data[uid] = {
+                "last_submission": ud["last_submission"].isoformat() if ud["last_submission"] else None,
+                "rejections": ud["rejections"],
+                "ban_until": ud["ban_until"].isoformat() if ud["ban_until"] else None
+            }
+        
         with open(USER_DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+            json.dump(serialized_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logging.error(f"Ошибка при сохранении данных пользователей: {e}")
 
@@ -667,21 +685,21 @@ async def main():
         })
         
         # 1. Проверка на бан
-        if ud["ban_until"] and now < datetime.fromisoformat(ud["ban_until"]):
-            until = datetime.fromisoformat(ud["ban_until"]).strftime("%d.%m.%Y")
+        if ud["ban_until"] and now < ud["ban_until"]:
+            until = ud["ban_until"].strftime("%d.%m.%Y")
             await message.answer(f"Сорри, ты у нас в изгнании до {until}, мемы отправлять нельзя.")
             return
             
         # 2. Проверка 24-часового лимита
-        if ud["last_submission"] and now - datetime.fromisoformat(ud["last_submission"]) < timedelta(hours=24):
-            nt = (datetime.fromisoformat(ud["last_submission"]) + timedelta(hours=24))
+        if ud["last_submission"] and now - ud["last_submission"] < timedelta(hours=24):
+            nt = ud["last_submission"] + timedelta(hours=24)
             await message.answer(
                 f"Ты уже отправлял мем в последние 24 ч. Попробуй после {nt.strftime('%H:%M %d.%m.%Y')}."
             )
             return
             
         # Успешно пойдёт на модерацию — сразу обновляем last_submission
-        ud["last_submission"] = now.isoformat()
+        ud["last_submission"] = now
         save_user_data(user_data)
 
         global meme_counter
@@ -830,9 +848,9 @@ async def main():
                     
                     # Устанавливаем бан при достижении 3 отклонений
                     if ud["rejections"] >= 3:
-                        ud["ban_until"] = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+                        ud["ban_until"] = datetime.now(timezone.utc) + timedelta(days=14)
                         # Оповещаем пользователя о бане
-                        until = datetime.fromisoformat(ud["ban_until"]).strftime("%d.%m.%Y")
+                        until = ud["ban_until"].strftime("%d.%m.%Y")
                         await bot.send_message(author_id, f"Сорри, ты у нас в изгнании до {until}.")
                     
                     save_user_data(user_data)
@@ -904,9 +922,9 @@ async def main():
                 
                 # Устанавливаем бан при достижении 3 отклонений
                 if ud["rejections"] >= 3:
-                    ud["ban_until"] = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+                    ud["ban_until"] = datetime.now(timezone.utc) + timedelta(days=14)
                     # Оповещаем пользователя о бане
-                    until = datetime.fromisoformat(ud["ban_until"]).strftime("%d.%m.%Y")
+                    until = ud["ban_until"].strftime("%d.%m.%Y")
                     await bot.send_message(author_id, f"Сорри, ты у нас в изгнании до {until}.")
                 
                 save_user_data(user_data)

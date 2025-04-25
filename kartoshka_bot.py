@@ -6,7 +6,7 @@ import random
 import math
 import json
 from datetime import datetime, timezone, timedelta
-from typing import Union, Optional, Dict
+from typing import Union, Optional, Dict, Any
 from types import SimpleNamespace
 
 from aiogram import Bot, Dispatcher, F
@@ -69,8 +69,9 @@ METALS_AND_TOXINS = [
     "Калий-цианистой", "Метилртутной"
 ]
 
-# Файл для хранения глобального счетчика meme_id
+# Файлы для хранения данных
 COUNTER_FILE = "meme_counter.json"
+USER_DATA_FILE = "user_data.json"
 
 def load_meme_counter() -> int:
     try:
@@ -91,8 +92,30 @@ def save_meme_counter(counter: int):
     except Exception as e:
         logging.error(f"Ошибка при сохранении счетчика meme_id: {e}")
 
+# Функции для работы с данными пользователей
+def load_user_data() -> Dict[str, Dict[str, Any]]:
+    try:
+        with open(USER_DATA_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        logging.error(f"Ошибка при загрузке данных пользователей: {e}")
+        return {}
+
+def save_user_data(data: Dict[str, Dict[str, Any]]):
+    try:
+        with open(USER_DATA_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"Ошибка при сохранении данных пользователей: {e}")
+
 # Инициализируем глобальный счетчик
 meme_counter = load_meme_counter()
+
+# Инициализируем данные пользователей
+user_data = load_user_data()
 
 bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
@@ -733,15 +756,52 @@ async def main():
                     await publish_meme(meme)
                     # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
                     await update_user_messages_with_status(meme, "⚡ Одбр.срч.")
+                    
+                    # Сбросим счётчик отклонений для автора
+                    author_id = meme.user_id
+                    if author_id:
+                        ud = user_data.setdefault(str(author_id), {
+                            "last_submission": None,
+                            "rejections": 0,
+                            "ban_until": None
+                        })
+                        ud["rejections"] = 0
+                        # Если пользователь находился в бане, снимаем бан
+                        ud["ban_until"] = None
+                        save_user_data(user_data)
                 else:
                     resolution = "✅ Одбр."
                     await scheduler.schedule(meme)
                     # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
                     await update_user_messages_with_status(meme, "✅ Одбр.")
+                    
+                    # Сбросим счётчик отклонений для автора
+                    author_id = meme.user_id
+                    if author_id:
+                        ud = user_data.setdefault(str(author_id), {
+                            "last_submission": None,
+                            "rejections": 0,
+                            "ban_until": None
+                        })
+                        ud["rejections"] = 0
+                        # Если пользователь находился в бане, снимаем бан
+                        ud["ban_until"] = None
+                        save_user_data(user_data)
             else:
                 resolution = "❌ Отк."
                 # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
                 await update_user_messages_with_status(meme, "❌ Отк.")
+                
+                # Увеличиваем счётчик отклонений для автора
+                author_id = meme.user_id
+                if author_id:
+                    ud = user_data.setdefault(str(author_id), {
+                        "last_submission": None,
+                        "rejections": 0,
+                        "ban_until": None
+                    })
+                    ud["rejections"] += 1
+                    save_user_data(user_data)
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
             await update_mod_messages_with_resolution(meme, resolution_with_summary)
@@ -755,11 +815,37 @@ async def main():
                 await publish_meme(meme)
                 # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
                 await update_user_messages_with_status(meme, "⚡ Одбр.срч.")
+                
+                # Сбросим счётчик отклонений для автора
+                author_id = meme.user_id
+                if author_id:
+                    ud = user_data.setdefault(str(author_id), {
+                        "last_submission": None,
+                        "rejections": 0,
+                        "ban_until": None
+                    })
+                    ud["rejections"] = 0
+                    # Если пользователь находился в бане, снимаем бан
+                    ud["ban_until"] = None
+                    save_user_data(user_data)
             else:
                 resolution = "✅ Одбр."
                 await scheduler.schedule(meme)
                 # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
                 await update_user_messages_with_status(meme, "✅ Одбр.")
+                
+                # Сбросим счётчик отклонений для автора
+                author_id = meme.user_id
+                if author_id:
+                    ud = user_data.setdefault(str(author_id), {
+                        "last_submission": None,
+                        "rejections": 0,
+                        "ban_until": None
+                    })
+                    ud["rejections"] = 0
+                    # Если пользователь находился в бане, снимаем бан
+                    ud["ban_until"] = None
+                    save_user_data(user_data)
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
             await update_mod_messages_with_resolution(meme, resolution_with_summary)
@@ -771,6 +857,18 @@ async def main():
             resolution = "❌ Отк."
             # Обновляем статус пользовательского виджета с финальным решением без лишних сообщений
             await update_user_messages_with_status(meme, "❌ Отк.")
+            
+            # Увеличиваем счётчик отклонений для автора
+            author_id = meme.user_id
+            if author_id:
+                ud = user_data.setdefault(str(author_id), {
+                    "last_submission": None,
+                    "rejections": 0,
+                    "ban_until": None
+                })
+                ud["rejections"] += 1
+                save_user_data(user_data)
+            
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
             await update_mod_messages_with_resolution(meme, resolution_with_summary)

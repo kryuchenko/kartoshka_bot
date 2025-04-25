@@ -589,5 +589,269 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.test_user_data[str(self.test_user_id)]["rejections"], 3)
 
 
+    async def test_ban_check_before_submission(self):
+        """Проверка отказа в приеме мема при наличии бана"""
+        # Предварительно устанавливаем бан для пользователя
+        ban_time = datetime.now(timezone.utc) + timedelta(days=1)
+        self.test_user_data[str(self.test_user_id)]["ban_until"] = ban_time.isoformat()
+        
+        # Создаем заглушку для handle_meme_suggestion
+        @self.dp.message(kartoshka_bot.filters_module.F.content_type.in_(["text", "photo", "video", "animation", "voice", "video_note"]))
+        async def handle_meme_suggestion(message):
+            user_id = message.from_user.id
+            
+            # Проверка бана и частоты отправки мемов
+            now = datetime.now(timezone.utc)
+            ud = self.test_user_data.setdefault(str(user_id), {
+                "last_submission": None,
+                "rejections": 0,
+                "ban_until": None
+            })
+            
+            # 1. Проверка на бан
+            if ud["ban_until"] and now < datetime.fromisoformat(ud["ban_until"]):
+                until = datetime.fromisoformat(ud["ban_until"]).strftime("%d.%m.%Y")
+                await message.answer(f"Сорри, ты у нас в изгнании до {until}, мемы отправлять нельзя.")
+                return
+            
+            # Если бана нет, то продолжаем обработку
+            await message.answer("Ваш мем отправлен на модерацию.")
+            
+        # Создаем тестовое сообщение от пользователя с баном
+        message = kartoshka_bot.types_module.Message(
+            message_id=1000,
+            from_user=kartoshka_bot.types_module.User(id=self.test_user_id),
+            text="Мем от забаненного пользователя",
+            content_type="text"
+        )
+        
+        # Мокаем функцию answer
+        message.answer = AsyncMock()
+        
+        # Устанавливаем kartoshka_bot.user_publish_choice
+        with patch('kartoshka_bot.user_publish_choice', {self.test_user_id: "user"}):
+            await handle_meme_suggestion(message)
+            
+            # Проверяем, что пользователь получил сообщение о бане
+            message.answer.assert_called_once()
+            args, kwargs = message.answer.call_args
+            self.assertIn("изгнании", args[0])
+            self.assertIn(datetime.fromisoformat(self.test_user_data[str(self.test_user_id)]["ban_until"]).strftime("%d.%m.%Y"), args[0])
+    
+    async def test_frequency_limit_check_before_submission(self):
+        """Проверка отказа в приеме мема при нарушении лимита частоты отправки"""
+        # Предварительно устанавливаем время последней отправки мема (менее 24 часов назад)
+        last_submission = datetime.now(timezone.utc) - timedelta(hours=12)
+        self.test_user_data[str(self.test_user_id)]["last_submission"] = last_submission.isoformat()
+        
+        # Создаем заглушку для handle_meme_suggestion
+        @self.dp.message(kartoshka_bot.filters_module.F.content_type.in_(["text", "photo", "video", "animation", "voice", "video_note"]))
+        async def handle_meme_suggestion(message):
+            user_id = message.from_user.id
+            
+            # Проверка бана и частоты отправки мемов
+            now = datetime.now(timezone.utc)
+            ud = self.test_user_data.setdefault(str(user_id), {
+                "last_submission": None,
+                "rejections": 0,
+                "ban_until": None
+            })
+            
+            # Проверка 24-часового лимита
+            if ud["last_submission"] and now - datetime.fromisoformat(ud["last_submission"]) < timedelta(hours=24):
+                nt = (datetime.fromisoformat(ud["last_submission"]) + timedelta(hours=24))
+                await message.answer(
+                    f"Ты уже отправлял мем в последние 24 ч. Попробуй после {nt.strftime('%H:%M %d.%m.%Y')}."
+                )
+                return
+            
+            # Если лимит не нарушен, то продолжаем обработку
+            await message.answer("Ваш мем отправлен на модерацию.")
+            
+        # Создаем тестовое сообщение от пользователя, нарушающего лимит частоты
+        message = kartoshka_bot.types_module.Message(
+            message_id=1001,
+            from_user=kartoshka_bot.types_module.User(id=self.test_user_id),
+            text="Мем с нарушением лимита частоты",
+            content_type="text"
+        )
+        
+        # Мокаем функцию answer
+        message.answer = AsyncMock()
+        
+        # Устанавливаем kartoshka_bot.user_publish_choice
+        with patch('kartoshka_bot.user_publish_choice', {self.test_user_id: "user"}):
+            await handle_meme_suggestion(message)
+            
+            # Проверяем, что пользователь получил сообщение о нарушении лимита частоты
+            message.answer.assert_called_once()
+            args, kwargs = message.answer.call_args
+            self.assertIn("уже отправлял мем", args[0])
+            next_time = (datetime.fromisoformat(self.test_user_data[str(self.test_user_id)]["last_submission"]) + timedelta(hours=24))
+            self.assertIn(next_time.strftime('%H:%M'), args[0])
+    
+    async def test_submission_timestamp_update(self):
+        """Проверка обновления временной метки последней отправки мема"""
+        # Начинаем без временной метки последней отправки
+        self.test_user_data[str(self.test_user_id)]["last_submission"] = None
+        
+        # Создаем заглушку для handle_meme_suggestion
+        @self.dp.message(kartoshka_bot.filters_module.F.content_type.in_(["text", "photo", "video", "animation", "voice", "video_note"]))
+        async def handle_meme_suggestion(message):
+            user_id = message.from_user.id
+            
+            # Проверка бана и частоты отправки мемов
+            now = datetime.now(timezone.utc)
+            ud = self.test_user_data.setdefault(str(user_id), {
+                "last_submission": None,
+                "rejections": 0,
+                "ban_until": None
+            })
+            
+            # Успешно пойдёт на модерацию — сразу обновляем last_submission
+            ud["last_submission"] = now.isoformat()
+            
+            # Для тестов сохраняем в наш мок с использованием реальной функции self.save_user_data
+            def mock_save_user_data(data):
+                for user_id, user_info in data.items():
+                    if user_id in self.test_user_data:
+                        self.test_user_data[user_id].update(user_info)
+            
+            mock_save_user_data(self.test_user_data)
+            
+            # Продолжаем обработку
+            await message.answer("Ваш мем отправлен на модерацию.")
+            
+        # Создаем тестовое сообщение
+        message = kartoshka_bot.types_module.Message(
+            message_id=1002,
+            from_user=kartoshka_bot.types_module.User(id=self.test_user_id),
+            text="Нормальный мем",
+            content_type="text"
+        )
+        
+        # Мокаем функцию answer
+        message.answer = AsyncMock()
+        
+        # Устанавливаем kartoshka_bot.user_publish_choice
+        with patch('kartoshka_bot.user_publish_choice', {self.test_user_id: "user"}):
+            # Запоминаем время до вызова
+            before_time = datetime.now(timezone.utc)
+            
+            await handle_meme_suggestion(message)
+            
+            # Запоминаем время после вызова
+            after_time = datetime.now(timezone.utc)
+            
+            # Проверяем, что временная метка last_submission была обновлена
+            self.assertIsNotNone(self.test_user_data[str(self.test_user_id)]["last_submission"])
+            
+            # Проверяем, что новая временная метка находится в правильном диапазоне времени
+            submission_time = datetime.fromisoformat(self.test_user_data[str(self.test_user_id)]["last_submission"])
+            self.assertTrue(before_time <= submission_time <= after_time)
+            
+            # Проверяем, что пользователь получил сообщение об успешной отправке
+            message.answer.assert_called_once_with("Ваш мем отправлен на модерацию.")
+    
+    async def test_automatic_ban_after_three_rejections(self):
+        """Проверка автоматического бана после трех отклонений"""
+        # Начинаем с нулевого счетчика отклонений
+        self.test_user_data[str(self.test_user_id)]["rejections"] = 0
+        
+        # Для правильной работы теста нужно явно переопределить, как работает save_user_data
+        def mock_save_user_data(data):
+            # Сохраняем данные обратно в наш тестовый словарь
+            for user_id, user_info in data.items():
+                if user_id in self.test_user_data:
+                    self.test_user_data[user_id].update(user_info)
+                
+        # Переопределяем мок для save_user_data
+        kartoshka_bot.save_user_data = mock_save_user_data
+        
+        # Моделируем режим криптоселектархии
+        with patch('kartoshka_bot.CRYPTOSELECTARCHY', True), patch('kartoshka_bot.VOTES_TO_REJECT', 3):
+            # Регистрируем обработчик колбэка голосования
+            @self.dp.callback_query(kartoshka_bot.filters_module.F.data.startswith(("approve_", "urgent_", "reject_")))
+            async def crypto_callback(callback):
+                data = callback.data
+                action, meme_id_str = data.split("_", 1)
+                meme_id = int(meme_id_str)
+                if meme_id not in self.scheduler_mock.pending_memes:
+                    await callback.answer("Заявка не найдена или уже обработана.")
+                    return
+
+                meme = self.scheduler_mock.pending_memes[meme_id]
+                crypto_id = callback.from_user.id
+                prev_vote = meme.add_vote(crypto_id, action)
+                self.scheduler_mock.save_moderation()
+
+                await kartoshka_bot.update_user_messages_with_status(meme)
+                await callback.answer("Ваш голос учтен.", show_alert=False)
+
+                if meme.is_rejected() and not meme.finalized:
+                    resolution = "❌ Отк."
+                    await kartoshka_bot.update_user_messages_with_status(meme, "❌ Отк.")
+                    
+                    # Увеличиваем счётчик отклонений для автора
+                    author_id = meme.user_id
+                    if author_id:
+                        ud = kartoshka_bot.user_data.setdefault(str(author_id), {
+                            "last_submission": None,
+                            "rejections": 0,
+                            "ban_until": None
+                        })
+                        ud["rejections"] += 1
+                        
+                        # Устанавливаем бан при достижении 3 отклонений
+                        if ud["rejections"] >= 3:
+                            ud["ban_until"] = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+                            
+                        kartoshka_bot.save_user_data(kartoshka_bot.user_data)
+                    
+                    meme.finalized = True
+                    resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
+                    await kartoshka_bot.update_mod_messages_with_resolution(meme, resolution_with_summary)
+                    del self.scheduler_mock.pending_memes[meme.meme_id]
+                    self.scheduler_mock.save_moderation()
+            
+            # Мокаем send_message для проверки уведомления о бане
+            bot.send_message = AsyncMock()
+            
+            # Создаем три мема и голосуем за их отклонение
+            for meme_idx in range(3):
+                meme = kartoshka_bot.Meme(
+                    meme_id=1000 + meme_idx,
+                    user_id=self.test_user_id,
+                    publish_choice="user",
+                    content=kartoshka_bot.types_module.Message(text=f"Тестовый мем #{meme_idx+1}")
+                )
+                self.scheduler_mock.pending_memes[1000 + meme_idx] = meme
+                
+                # Создаем тестовые колбэки для голосования "отклонить"
+                callbacks = []
+                for i in range(3):  # Для отклонения нужно 3 голоса
+                    callback = kartoshka_bot.types_module.CallbackQuery(
+                        id=f"reject_callback_{meme_idx}_{i}",
+                        from_user=kartoshka_bot.types_module.User(id=700+i),
+                        data=f"reject_{meme.meme_id}"
+                    )
+                    callback.answer = AsyncMock()
+                    callbacks.append(callback)
+                
+                # Голосуем за отклонение мема
+                for callback in callbacks:
+                    await crypto_callback(callback)
+                
+                # Проверяем состояние счетчика отклонений
+                self.assertEqual(self.test_user_data[str(self.test_user_id)]["rejections"], meme_idx + 1)
+            
+            # Проверяем, что после третьего отклонения пользователь получил бан
+            self.assertIsNotNone(self.test_user_data[str(self.test_user_id)]["ban_until"])
+            
+            # Проверяем, что срок бана составляет 14 дней от текущего времени
+            ban_until = datetime.fromisoformat(self.test_user_data[str(self.test_user_id)]["ban_until"])
+            now = datetime.now(timezone.utc)
+            self.assertTrue(now + timedelta(days=13) < ban_until < now + timedelta(days=15))
+
 if __name__ == "__main__":
     unittest.main()

@@ -657,6 +657,32 @@ async def main():
         if user_id not in user_publish_choice:
             await message.answer("Сначала выберите способ публикации с помощью команды /start.")
             return
+        
+        # Проверка бана и частоты отправки мемов
+        now = datetime.now(timezone.utc)
+        ud = user_data.setdefault(str(user_id), {
+            "last_submission": None,
+            "rejections": 0,
+            "ban_until": None
+        })
+        
+        # 1. Проверка на бан
+        if ud["ban_until"] and now < datetime.fromisoformat(ud["ban_until"]):
+            until = datetime.fromisoformat(ud["ban_until"]).strftime("%d.%m.%Y")
+            await message.answer(f"Сорри, ты у нас в изгнании до {until}, мемы отправлять нельзя.")
+            return
+            
+        # 2. Проверка 24-часового лимита
+        if ud["last_submission"] and now - datetime.fromisoformat(ud["last_submission"]) < timedelta(hours=24):
+            nt = (datetime.fromisoformat(ud["last_submission"]) + timedelta(hours=24))
+            await message.answer(
+                f"Ты уже отправлял мем в последние 24 ч. Попробуй после {nt.strftime('%H:%M %d.%m.%Y')}."
+            )
+            return
+            
+        # Успешно пойдёт на модерацию — сразу обновляем last_submission
+        ud["last_submission"] = now.isoformat()
+        save_user_data(user_data)
 
         global meme_counter
         meme_counter += 1
@@ -801,6 +827,14 @@ async def main():
                         "ban_until": None
                     })
                     ud["rejections"] += 1
+                    
+                    # Устанавливаем бан при достижении 3 отклонений
+                    if ud["rejections"] >= 3:
+                        ud["ban_until"] = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+                        # Оповещаем пользователя о бане
+                        until = datetime.fromisoformat(ud["ban_until"]).strftime("%d.%m.%Y")
+                        await bot.send_message(author_id, f"Сорри, ты у нас в изгнании до {until}.")
+                    
                     save_user_data(user_data)
             meme.finalized = True
             resolution_with_summary = f"{resolution} {meme.get_vote_summary()}"
@@ -867,6 +901,14 @@ async def main():
                     "ban_until": None
                 })
                 ud["rejections"] += 1
+                
+                # Устанавливаем бан при достижении 3 отклонений
+                if ud["rejections"] >= 3:
+                    ud["ban_until"] = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+                    # Оповещаем пользователя о бане
+                    until = datetime.fromisoformat(ud["ban_until"]).strftime("%d.%m.%Y")
+                    await bot.send_message(author_id, f"Сорри, ты у нас в изгнании до {until}.")
+                
                 save_user_data(user_data)
             
             meme.finalized = True

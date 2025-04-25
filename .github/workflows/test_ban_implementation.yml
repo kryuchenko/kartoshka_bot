@@ -1,0 +1,67 @@
+name: Test Ban Implementation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'kartoshka_bot.py'
+      - 'tests/test_user_rejection.py'
+      - '.github/workflows/test_ban_implementation.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'kartoshka_bot.py'
+      - 'tests/test_user_rejection.py'
+      - '.github/workflows/test_ban_implementation.yml'
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  test_ban_implementation:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Клонируем код
+    - uses: actions/checkout@v4
+
+    # 2. Ставим Python
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    # 3. Зависимости
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+        pip install pytest pytest-asyncio pytest-cov
+
+    # 4. Переменные окружения, которые нужны тестам
+    - name: Prepare runtime env vars
+      run: |
+        echo "BOT_TOKEN=123456789:TEST_TOKEN_FOR_TESTING" >> $GITHUB_ENV
+        echo "EDITOR_IDS=123,456,789" >> $GITHUB_ENV
+        echo "PUBLISH_CHAT_ID=-1001234567890" >> $GITHUB_ENV
+        echo "BOT_NAME=TestBot" >> $GITHUB_ENV
+        echo "POST_FREQUENCY_MINUTES=60" >> $GITHUB_ENV
+        echo "CRYPTOSELECTARCHY=true" >> $GITHUB_ENV
+        echo "VOTES_TO_APPROVE=3" >> $GITHUB_ENV
+        echo "VOTES_TO_REJECT=3" >> $GITHUB_ENV
+
+    # 5. Запускаем специфичные тесты на отклонение мемов и бан
+    - name: Run rejection tracking tests
+      run: |
+        pytest -v tests/test_user_rejection.py::TestUserRejectionTracking::test_multiple_rejections_counting
+      
+    # 6. Отправляем отчет о результатах
+    - name: Report test result
+      if: always()
+      run: |
+        if [ ${{ job.status }} == 'success' ]; then
+          echo "✅ Ban implementation test passed!"
+          echo "The test successfully verified that user rejection count increments with each rejected meme and resets on approval."
+        else
+          echo "❌ Ban implementation test failed!"
+          echo "Please check the test logs to see what went wrong with the ban implementation."
+        fi

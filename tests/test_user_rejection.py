@@ -388,7 +388,7 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
         """Проверка снятия бана при одобрении мема"""
         # Предварительно устанавливаем бан для пользователя
         ban_time = datetime.now(timezone.utc) + timedelta(days=1)
-        self.test_user_data[str(self.test_user_id)]["ban_until"] = ban_time.isoformat()
+        self.test_user_data[str(self.test_user_id)]["ban_until"] = ban_time
         
         # Моделируем режим криптоселектархии
         with patch('kartoshka_bot.CRYPTOSELECTARCHY', True), patch('kartoshka_bot.VOTES_TO_APPROVE', 3):
@@ -593,7 +593,7 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
         """Проверка отказа в приеме мема при наличии бана"""
         # Предварительно устанавливаем бан для пользователя
         ban_time = datetime.now(timezone.utc) + timedelta(days=1)
-        self.test_user_data[str(self.test_user_id)]["ban_until"] = ban_time.isoformat()
+        self.test_user_data[str(self.test_user_id)]["ban_until"] = ban_time
         
         # Создаем заглушку для handle_meme_suggestion
         @self.dp.message(kartoshka_bot.filters_module.F.content_type.in_(["text", "photo", "video", "animation", "voice", "video_note"]))
@@ -636,13 +636,13 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
             message.answer.assert_called_once()
             args, kwargs = message.answer.call_args
             self.assertIn("изгнании", args[0])
-            self.assertIn(datetime.fromisoformat(self.test_user_data[str(self.test_user_id)]["ban_until"]).strftime("%d.%m.%Y"), args[0])
+            self.assertIn(self.test_user_data[str(self.test_user_id)]["ban_until"].strftime("%d.%m.%Y"), args[0])
     
     async def test_frequency_limit_check_before_submission(self):
         """Проверка отказа в приеме мема при нарушении лимита частоты отправки"""
         # Предварительно устанавливаем время последней отправки мема (менее 24 часов назад)
         last_submission = datetime.now(timezone.utc) - timedelta(hours=12)
-        self.test_user_data[str(self.test_user_id)]["last_submission"] = last_submission.isoformat()
+        self.test_user_data[str(self.test_user_id)]["last_submission"] = last_submission
         
         # Создаем заглушку для handle_meme_suggestion
         @self.dp.message(kartoshka_bot.filters_module.F.content_type.in_(["text", "photo", "video", "animation", "voice", "video_note"]))
@@ -687,7 +687,7 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
             message.answer.assert_called_once()
             args, kwargs = message.answer.call_args
             self.assertIn("уже отправлял мем", args[0])
-            next_time = (datetime.fromisoformat(self.test_user_data[str(self.test_user_id)]["last_submission"]) + timedelta(hours=24))
+            next_time = self.test_user_data[str(self.test_user_id)]["last_submission"] + timedelta(hours=24)
             self.assertIn(next_time.strftime('%H:%M'), args[0])
     
     async def test_submission_timestamp_update(self):
@@ -709,7 +709,7 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
             })
             
             # Успешно пойдёт на модерацию — сразу обновляем last_submission
-            ud["last_submission"] = now.isoformat()
+            ud["last_submission"] = now
             
             # Для тестов сохраняем в наш мок с использованием реальной функции self.save_user_data
             def mock_save_user_data(data):
@@ -747,7 +747,7 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(self.test_user_data[str(self.test_user_id)]["last_submission"])
             
             # Проверяем, что новая временная метка находится в правильном диапазоне времени
-            submission_time = datetime.fromisoformat(self.test_user_data[str(self.test_user_id)]["last_submission"])
+            submission_time = self.test_user_data[str(self.test_user_id)]["last_submission"]
             self.assertTrue(before_time <= submission_time <= after_time)
             
             # Проверяем, что пользователь получил сообщение об успешной отправке
@@ -804,7 +804,7 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
                         
                         # Устанавливаем бан при достижении 3 отклонений
                         if ud["rejections"] >= 3:
-                            ud["ban_until"] = (datetime.now(timezone.utc) + timedelta(days=14)).isoformat()
+                            ud["ban_until"] = datetime.now(timezone.utc) + timedelta(days=14)
                             
                         kartoshka_bot.save_user_data(kartoshka_bot.user_data)
                     
@@ -815,7 +815,7 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
                     self.scheduler_mock.save_moderation()
             
             # Мокаем send_message для проверки уведомления о бане
-            bot.send_message = AsyncMock()
+            kartoshka_bot.bot.send_message = AsyncMock()
             
             # Создаем три мема и голосуем за их отклонение
             for meme_idx in range(3):
@@ -849,7 +849,7 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
             self.assertIsNotNone(self.test_user_data[str(self.test_user_id)]["ban_until"])
             
             # Проверяем, что срок бана составляет 14 дней от текущего времени
-            ban_until = datetime.fromisoformat(self.test_user_data[str(self.test_user_id)]["ban_until"])
+            ban_until = self.test_user_data[str(self.test_user_id)]["ban_until"]
             now = datetime.now(timezone.utc)
             self.assertTrue(now + timedelta(days=13) < ban_until < now + timedelta(days=15))
 

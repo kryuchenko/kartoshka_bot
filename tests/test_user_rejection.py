@@ -462,6 +462,17 @@ class TestUserRejectionTracking(unittest.IsolatedAsyncioTestCase):
         # Начинаем с нулевого счетчика отклонений
         self.test_user_data[str(self.test_user_id)]["rejections"] = 0
         
+        # Для правильной работы теста нужно явно переопределить, как работает save_user_data
+        # чтобы изменения сохранялись в test_user_data
+        def mock_save_user_data(data):
+            # Сохраняем данные обратно в наш тестовый словарь
+            for user_id, user_info in data.items():
+                if user_id in self.test_user_data:
+                    self.test_user_data[user_id].update(user_info)
+                
+        # Переопределяем мок для save_user_data
+        kartoshka_bot.save_user_data = mock_save_user_data
+        
         # Моделируем режим криптоселектархии
         with patch('kartoshka_bot.CRYPTOSELECTARCHY', True), patch('kartoshka_bot.VOTES_TO_REJECT', 3):
             # Регистрируем обработчик колбэка голосования

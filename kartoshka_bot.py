@@ -353,7 +353,17 @@ class Meme:
     def get_caption(self) -> str:
         user_text = getattr(self.content, "caption", "") or getattr(self.content, "text", "")
         if self.publish_choice == "user":
-            prefix = "Мем от пользователя"
+            # Извлекаем имя пользователя из сообщения
+            from_user = getattr(self.content, "from_user", None)
+            if from_user:
+                if hasattr(from_user, "username") and from_user.username:
+                    prefix = f"Мем от пользователя @{from_user.username}"
+                elif hasattr(from_user, "first_name") and from_user.first_name:
+                    prefix = f"Мем от пользователя {from_user.first_name}"
+                else:
+                    prefix = "Мем от пользователя"
+            else:
+                prefix = "Мем от пользователя"
         else:
             random_metal = random.choice(METALS_AND_TOXINS)
             plain_prefix = f"Мем от Анонимной {random_metal} Картошки"

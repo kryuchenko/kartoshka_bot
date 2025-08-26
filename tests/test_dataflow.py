@@ -49,16 +49,24 @@ class TestMemeCreation(unittest.TestCase):
     """Тесты для этапа создания мема пользователем"""
     
     def setUp(self):
+        # Создаем пользователя для тестов
+        self.test_user = MagicMock()
+        self.test_user.username = "TestUser"
+        self.test_user.id = 123
+        self.test_user.first_name = "Test"
+        
         self.text_message = MagicMock()
         self.text_message.content_type = "text"
         self.text_message.text = "Тестовый текстовый мем"
         self.text_message.caption = None
+        self.text_message.from_user = self.test_user
         
         self.photo_message = MagicMock()
         self.photo_message.content_type = "photo"
         self.photo_message.text = None
         self.photo_message.caption = "Тестовый мем с фото"
         self.photo_message.photo = [MagicMock(file_id="test_photo_id")]
+        self.photo_message.from_user = self.test_user
     
     def test_create_text_meme_user(self):
         """Проверка создания текстового мема от пользователя"""
@@ -72,9 +80,9 @@ class TestMemeCreation(unittest.TestCase):
         self.assertEqual(len(meme.votes), 0)
         self.assertFalse(meme.finalized)
         
-        # Проверка подписи
+        # Проверка подписи (теперь включает username)
         caption = meme.get_caption()
-        self.assertTrue(caption.startswith("Мем от пользователя"))
+        self.assertTrue("Мем от пользователя @TestUser" in caption)
         self.assertIn("Тестовый текстовый мем", caption)
     
     def test_create_text_meme_anonymous(self):
@@ -96,9 +104,9 @@ class TestMemeCreation(unittest.TestCase):
         """Проверка создания мема с фото от пользователя"""
         meme = Meme(meme_id=3, user_id=456, publish_choice="user", content=self.photo_message)
         
-        # Проверка подписи
+        # Проверка подписи (теперь включает username)
         caption = meme.get_caption()
-        self.assertTrue(caption.startswith("Мем от пользователя"))
+        self.assertTrue("Мем от пользователя @TestUser" in caption)
         self.assertIn("Тестовый мем с фото", caption)
     
     def test_create_photo_meme_anonymous(self):

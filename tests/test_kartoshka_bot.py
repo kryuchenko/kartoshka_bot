@@ -231,8 +231,8 @@ def test_meme_get_caption_user():
     msg = TestMessage(caption="User meme caption", text="User meme text", from_user=user)
     meme = Meme(10, 1010, "user", msg)
     caption = meme.get_caption()
-    # В оригинальном коде используется "Мем от пользователя", а не @username
-    assert "Мем от пользователя" in caption
+    # Теперь проверяем, что username включается в подпись
+    assert "Мем от пользователя @TestUser" in caption
     assert "User meme caption" in caption or "User meme text" in caption
 
 def test_meme_get_caption_anonymous(monkeypatch):
@@ -250,11 +250,10 @@ def test_meme_get_caption_empty():
     msg = TestMessage(caption="", text="", from_user=user)
     meme = Meme(99, 303, "user", msg)
     caption = meme.get_caption()
-    # В оригинальном коде используется "Мем от пользователя", 
-    # а не прямой username
-    assert "Мем от пользователя" in caption
+    # Теперь проверяем, что username включается в подпись
+    assert "Мем от пользователя @UserEmpty" in caption
     # Проверяем также что это полный текст без дополнительного содержимого
-    assert caption == "Мем от пользователя"
+    assert caption == "Мем от пользователя @UserEmpty"
 
 # ----- Тесты для планировщика публикаций (Scheduler) -----
 @pytest.mark.asyncio

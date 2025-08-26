@@ -361,9 +361,9 @@ class Meme:
                 elif hasattr(from_user, "first_name") and from_user.first_name:
                     prefix = f"Мем от пользователя {from_user.first_name}"
                 else:
-                    prefix = "Мем от пользователя"
+                    prefix = "Мем от пользователя [ДАННЫЕ УДАЛЕНЫ]"
             else:
-                prefix = "Мем от пользователя"
+                prefix = "Мем от пользователя [ДАННЫЕ УДАЛЕНЫ]"
         else:
             random_metal = random.choice(METALS_AND_TOXINS)
             plain_prefix = f"Мем от Анонимной {random_metal} Картошки"

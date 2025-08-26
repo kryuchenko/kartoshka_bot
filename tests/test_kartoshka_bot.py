@@ -255,6 +255,16 @@ def test_meme_get_caption_empty():
     # Проверяем также что это полный текст без дополнительного содержимого
     assert caption == "Мем от пользователя @UserEmpty"
 
+def test_meme_get_caption_no_username():
+    # Тест для пользователя без username и имени
+    user = DummyUser(username=None, id=404)
+    msg = TestMessage(caption="", text="", from_user=user)
+    meme = Meme(100, 404, "user", msg)
+    caption = meme.get_caption()
+    # Проверяем, что используется [ДАННЫЕ УДАЛЕНЫ]
+    assert "Мем от пользователя [ДАННЫЕ УДАЛЕНЫ]" in caption
+    assert caption == "Мем от пользователя [ДАННЫЕ УДАЛЕНЫ]"
+
 # ----- Тесты для планировщика публикаций (Scheduler) -----
 @pytest.mark.asyncio
 async def test_scheduler_schedule_immediate(monkeypatch):

@@ -184,6 +184,13 @@ def serialize_message(message: Message) -> dict:
 class DummyMessage:
     def __init__(self, data: dict):
         self.content_type = data["content_type"]
+        
+        # Восстанавливаем информацию о пользователе, если она есть
+        if "from_user" in data:
+            self.from_user = SimpleNamespace(**data["from_user"])
+        else:
+            self.from_user = None
+        
         if self.content_type == "text":
             self.text = data.get("text", "")
         elif self.content_type == "photo":
@@ -374,11 +381,21 @@ class Meme:
 
     def to_dict(self) -> dict:
         # Для модерации сохраняем полную информацию, включая голоса.
-        # Для анонимных (potato) не сохраняем user_id.
+        # Для анонимных (potato) не сохраняем user_id и информацию о пользователе.
+        serialized_content = serialize_message(self.content)
+        
+        # Если мем неанонимный, сохраняем информацию о пользователе
+        if self.publish_choice == "user" and hasattr(self.content, "from_user") and self.content.from_user:
+            serialized_content["from_user"] = {
+                "id": self.content.from_user.id,
+                "username": getattr(self.content.from_user, "username", None),
+                "first_name": getattr(self.content.from_user, "first_name", None)
+            }
+        
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
-            "content": serialize_message(self.content),
+            "content": serialized_content,
             "created_time": self.created_time.isoformat(),
             "votes": self.votes
         }
@@ -387,10 +404,20 @@ class Meme:
         return meme_dict
 
     def to_publication_dict(self) -> dict:
+        serialized_content = serialize_message(self.content)
+        
+        # Если мем неанонимный, сохраняем информацию о пользователе
+        if self.publish_choice == "user" and hasattr(self.content, "from_user") and self.content.from_user:
+            serialized_content["from_user"] = {
+                "id": self.content.from_user.id,
+                "username": getattr(self.content.from_user, "username", None),
+                "first_name": getattr(self.content.from_user, "first_name", None)
+            }
+        
         meme_dict = {
             "meme_id": self.meme_id,
             "publish_choice": self.publish_choice,
-            "content": serialize_message(self.content),
+            "content": serialized_content,
             "created_time": self.created_time.isoformat()
         }
         if self.publish_choice != "potato":
@@ -747,8 +774,10 @@ async def main():
             from_text = "Картошка"
 
         user_text = message.caption if message.caption else message.text
+        # Если текст пустой или None, показываем специальное сообщение
+        display_text = user_text if user_text else "[Без текста]"
         info_text = (
-            f"Мем ID: {meme.meme_id}\n\n{user_text}\n\nОт: {from_text}\n"
+            f"Мем ID: {meme.meme_id}\n\n{display_text}\n\nОт: {from_text}\n"
             f"Публикация как: {chosen_mode}"
         )
 

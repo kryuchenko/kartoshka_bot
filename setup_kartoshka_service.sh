@@ -14,6 +14,28 @@ if [ "$EUID" -ne 0 ]; then
     error_exit "Пожалуйста, запустите скрипт с правами суперпользователя (sudo)."
 fi
 
+# Настройка swap (1GB), если его нет
+SWAP_FILE="/swapfile"
+if [ ! -f "$SWAP_FILE" ]; then
+    echo "Создание swap файла (1GB)..."
+    fallocate -l 1G "$SWAP_FILE" || dd if=/dev/zero of="$SWAP_FILE" bs=1M count=1024
+    chmod 600 "$SWAP_FILE"
+    mkswap "$SWAP_FILE"
+    swapon "$SWAP_FILE"
+    # Добавляем в fstab для автозагрузки
+    if ! grep -q "$SWAP_FILE" /etc/fstab; then
+        echo "$SWAP_FILE none swap sw 0 0" >> /etc/fstab
+    fi
+    echo "Swap успешно создан и активирован."
+else
+    echo "Swap файл уже существует."
+    # Активируем, если не активен
+    if ! swapon --show | grep -q "$SWAP_FILE"; then
+        swapon "$SWAP_FILE"
+        echo "Swap активирован."
+    fi
+fi
+
 # Получение текущего пользователя (предполагается, что это владелец проекта)
 USER=$(logname)
 GROUP=$USER
@@ -83,6 +105,10 @@ Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
+
+# Лимиты памяти
+MemoryMax=400M
+MemorySwapMax=600M
 
 [Install]
 WantedBy=multi-user.target

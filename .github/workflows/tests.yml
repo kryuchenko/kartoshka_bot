@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 # нужно для пуша бейджа и комментариев в PR
 permissions:
@@ -17,11 +18,11 @@ jobs:
 
     steps:
     # 1. Клонируем код
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v6
 
     # 2. Ставим Python
     - name: Set up Python
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v6
       with:
         python-version: '3.10'
 
@@ -44,53 +45,41 @@ jobs:
         echo "VOTES_TO_APPROVE=3" >> $GITHUB_ENV
         echo "VOTES_TO_REJECT=3" >> $GITHUB_ENV
 
-    # 5. Запуск всех тестов с покрытием
+    # 5. Запуск всех тестов с покрытием (меряем пакет kartoshka/, не 7-строчный shim)
     - name: Run tests with coverage
       run: |
-        # Выведем информацию о критичных функциях, которые будут проверены
-        echo "➡️ Запускаем тесты, включая проверку системы отклонений и блокировки"
-        echo "⏳ Будет проверено следующее:"
-        echo "   - Счетчик отклонений увеличивается при отклонении мема"
-        echo "   - Счетчик сбрасывается при одобрении мема"
-        echo "   - Бан снимается при одобрении мема"
-        echo "-------------------------------------------"
-        
-        # Запуск всех тестов, включая тесты системы отклонений
         pytest -v \
+          --cov=kartoshka \
           --cov=kartoshka_bot \
           --cov-report=term-missing:skip-covered \
           --cov-report=xml \
           --cov-report=html
-          
-        echo "-------------------------------------------"
-        echo "✅ Все тесты успешно пройдены!"
-        echo "   Проверка системы отклонений и бана выполнена."
 
     # 6. Загружаем HTML‑отчёт как artefact
     - name: Upload HTML coverage report
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: coverage-html
         path: htmlcov/
 
     # 7. Создаём/обновляем coverage.svg
+    #    coverage-badge@1.1.2 импортит pkg_resources → нужен setuptools<81.
+    #    Раньше использовался tj-actions/coverage-badge-py@v2, но он сам апгрейдит
+    #    setuptools до latest и ломает себя. Ставим руками.
     - name: Create coverage.svg badge
       id: badge
-      uses: tj-actions/coverage-badge-py@v2       # живой экшен
-      with:
-        output: coverage.svg
-
-    # 8. Проверяем, изменился ли бейдж
-    - name: Verify badge changed
-      id: verify
-      uses: tj-actions/verify-changed-files@v16
-      with:
-        files: coverage.svg
-
-    # 9. Коммитим и пушим в main, только если файл обновился
-    - name: Commit and push badge
-      if: steps.verify.outputs.files_changed == 'true' && github.ref == 'refs/heads/main'
       run: |
+        pip install 'setuptools<81' coverage-badge
+        coverage-badge -o coverage.svg -f
+
+    # 8. Коммитим и пушим бейдж, только если файл реально изменился
+    - name: Commit and push badge
+      if: github.ref == 'refs/heads/main'
+      run: |
+        if git diff --quiet coverage.svg; then
+          echo "coverage.svg не изменился, пропускаем коммит"
+          exit 0
+        fi
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name  "github-actions[bot]"
         git add coverage.svg
@@ -113,7 +102,7 @@ jobs:
     # 11. Комментарий в PR (sticky — обновляет, а не плодит)
     - name: PR comment with coverage
       if: github.event_name == 'pull_request'
-      uses: marocchino/sticky-pull-request-comment@v2
+      uses: marocchino/sticky-pull-request-comment@v3
       with:
         message: |
           🧪 **Test coverage:** **${{ steps.cov.outputs.pct }}%**

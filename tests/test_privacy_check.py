@@ -11,13 +11,13 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 # Импорты из тестового модуля, который уже корректно настроен
-from tests.test_kartoshka_bot import Meme, DummyUser, TestMessage
+from tests.test_kartoshka_bot import Meme, DummyUser, FakeMessage
 
 class TestPrivacy(unittest.TestCase):
     def test_user_meme_shows_username(self):
         """Неанонимный мем показывает username"""
         user = DummyUser(username="publicuser", id=123)
-        msg = TestMessage(text="Публичный мем", from_user=user)
+        msg = FakeMessage(text="Публичный мем", from_user=user)
         meme = Meme(1, 123, "user", msg)
         
         # Получаем caption
@@ -41,7 +41,7 @@ class TestPrivacy(unittest.TestCase):
     def test_anonymous_meme_hides_username(self):
         """Анонимный мем скрывает username"""
         user = DummyUser(username="secretuser", id=456)
-        msg = TestMessage(text="Секретный мем", from_user=user)
+        msg = FakeMessage(text="Секретный мем", from_user=user)
         meme = Meme(2, 456, "potato", msg)
         
         # Получаем caption

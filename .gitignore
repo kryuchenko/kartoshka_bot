@@ -1,6 +1,42 @@
 # Игнорировать файл с переменными окружения
 .env
 
-# Игнорировать директорию виртуального окружения
+# Виртуальные окружения
 venv/
+.venv/
 
+# IDE
+.idea/
+.vscode/
+
+# Python кеши
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# Покрытие
+htmlcov/
+.coverage
+coverage.xml
+
+# Артефакты code2flow
+call_graph.svg
+call_graph.gv
+call_graph.json
+
+# macOS
+.DS_Store
+
+# Ключи
+*.pem
+
+# Runtime-состояние (генерируется ботом при работе, не должно быть в репе)
+meme_counter.json
+moderation_queue.json
+publication_queue.json
+user_data.json
+
+# Dev-утилиты профилирования
+profile_*.py
+memray*.bin

@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import json
 
 # Импортируем нужные классы
-from kartoshka_bot import Meme
+from kartoshka.models import Meme
 
 class TestUserPrivacy(unittest.TestCase):
     """Тесты для проверки приватности пользователей"""

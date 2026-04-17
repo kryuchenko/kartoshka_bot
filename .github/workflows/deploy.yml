@@ -8,31 +8,68 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup SSH
-        uses: webfactory/ssh-agent@v0.8.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
-      - name: Add server to known_hosts
+        env:
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_KNOWN_HOSTS }}" > ~/.ssh/known_hosts
+          chmod 700 ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          printf '%s\n' "$KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 644 ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host deploy-target
+            HostName $DEPLOY_HOST
+            User $DEPLOY_USER
+            IdentityFile ~/.ssh/id_deploy
+            IdentitiesOnly yes
+            StrictHostKeyChecking yes
+          EOF
+          chmod 600 ~/.ssh/config
 
       - name: Suppress MOTD (one-time)
-        run: |
-          ssh -o StrictHostKeyChecking=yes ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} \
-            "touch ~/.hushlogin" || true
+        run: ssh deploy-target "touch ~/.hushlogin" || true
 
       - name: Deploy via SSH
         run: |
-          ssh -q -o StrictHostKeyChecking=yes ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
+          ssh -q deploy-target << 'EOF'
           set -e
           cd ~/projects/kartoshka_bot
 
-          git pull origin main
+          # Бэкап runtime state (до этого коммита JSON'ы были tracked, pull мог бы их снести).
+          BACKUP_DIR=~/kartoshka-backup-$(date +%Y%m%d-%H%M%S)
+          mkdir -p "$BACKUP_DIR"
+          cp -p *.json "$BACKUP_DIR/" 2>/dev/null || true
+          cp -p .env "$BACKUP_DIR/" 2>/dev/null || true
+          echo "✔ State backed up to $BACKUP_DIR"
 
+          # Жёсткий reset: отбрасывает локальные изменения в tracked файлах
+          # (включая старые tracked JSON'ы), обновляет до origin/main.
+          git fetch origin main
+          git reset --hard origin/main
+
+          # JSON'ы теперь untracked в репе; возвращаем их с бэкапа,
+          # чтобы бот стартовал с реальным состоянием, а не пустым.
+          for f in meme_counter.json moderation_queue.json publication_queue.json user_data.json; do
+            if [ -f "$BACKUP_DIR/$f" ]; then
+              cp -p "$BACKUP_DIR/$f" "./$f"
+            fi
+          done
+          echo "✔ Runtime JSON state restored"
+
+          # Обновляем зависимости (aiogram 3.17→3.22, pytest-asyncio 0.25→1.2, etc.)
+          source venv/bin/activate
+          pip install -q --upgrade pip
+          pip install -q -r requirements.txt
+          echo "✔ Dependencies installed"
+
+          # Перезаписываем .env из secrets.
           cat > .env << 'EOT'
           BOT_TOKEN=${{ secrets.BOT_TOKEN }}
           EDITOR_IDS=${{ secrets.EDITOR_IDS }}
@@ -46,9 +83,12 @@ jobs:
 
           sudo systemctl restart kartoshka_bot.service
 
+          # Даём боту несколько секунд инициализироваться и читаем статус.
+          sleep 3
           if ! sudo systemctl is-active --quiet kartoshka_bot.service; then
             echo "✖ Service failed to start" >&2
-            sudo journalctl -u kartoshka_bot.service --no-pager -n 50 >&2
+            # -o cat: только message, без hostname/timestamp (не палим VPC-инфу в публичные логи).
+            sudo journalctl -u kartoshka_bot.service --no-pager -n 80 -o cat >&2
             exit 1
           fi
 

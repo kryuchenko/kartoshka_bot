@@ -42,7 +42,8 @@ with patch.dict('sys.modules'):
     sys.modules['aiogram.filters'] = MagicMock()
     
     # Теперь можно импортировать модуль
-    from kartoshka_bot import Meme, Scheduler, bot
+    from kartoshka.models import Meme
+from kartoshka.scheduler import Scheduler
 
 
 class TestMemeCreation(unittest.TestCase):
@@ -76,7 +77,9 @@ class TestMemeCreation(unittest.TestCase):
         self.assertEqual(meme.meme_id, 1)
         self.assertEqual(meme.user_id, 123)
         self.assertEqual(meme.publish_choice, "user")
-        self.assertEqual(meme.content, self.text_message)
+        # Meme конвертирует Message в лёгкий MessageSnapshot, проверяем ключевые поля
+        self.assertEqual(meme.content.content_type, "text")
+        self.assertEqual(meme.content.text, self.text_message.text)
         self.assertEqual(len(meme.votes), 0)
         self.assertFalse(meme.finalized)
         
@@ -189,7 +192,7 @@ class TestModerationProcess(unittest.IsolatedAsyncioTestCase):
     async def test_approval_decision(self):
         """Проверка одобрения мема"""
         # Фиксируем VOTES_TO_APPROVE = 3 для теста
-        with patch("kartoshka_bot.VOTES_TO_APPROVE", 3):
+        with patch("kartoshka.config.VOTES_TO_APPROVE", 3):
             # Добавляем голоса для одобрения
             self.meme.add_vote(101, "approve")
             self.meme.add_vote(102, "approve")
@@ -206,7 +209,7 @@ class TestModerationProcess(unittest.IsolatedAsyncioTestCase):
     async def test_urgent_decision(self):
         """Проверка срочной публикации"""
         # Фиксируем VOTES_TO_APPROVE = 3 для теста
-        with patch("kartoshka_bot.VOTES_TO_APPROVE", 3):
+        with patch("kartoshka.config.VOTES_TO_APPROVE", 3):
             # urgent_threshold = max(1, math.ceil(3 * 0.51)) = 2
             
             # Добавляем один голос "срочно"
@@ -224,7 +227,7 @@ class TestModerationProcess(unittest.IsolatedAsyncioTestCase):
     async def test_rejection_decision(self):
         """Проверка отклонения мема"""
         # Фиксируем VOTES_TO_REJECT = 3 для теста
-        with patch("kartoshka_bot.VOTES_TO_REJECT", 3):
+        with patch("kartoshka.config.VOTES_TO_REJECT", 3):
             # Добавляем голоса для отклонения
             self.meme.add_vote(101, "reject")
             self.meme.add_vote(102, "reject")
@@ -238,7 +241,7 @@ class TestModerationProcess(unittest.IsolatedAsyncioTestCase):
             # Теперь мем должен быть отклонен
             self.assertTrue(self.meme.is_rejected())
     
-    @patch('kartoshka_bot.update_user_messages_with_status')
+    @patch('kartoshka.notifications.update_user_messages_with_status')
     async def test_widget_update(self, mock_update):
         """Проверка обновления виджета пользователя"""
         # Добавляем сообщение пользователя для обновления
@@ -269,10 +272,10 @@ class TestPublicationQueue(unittest.IsolatedAsyncioTestCase):
         self.meme = Meme(meme_id=20, user_id=123, publish_choice="user", content=self.text_message)
         
         # Создаем планировщик с патчем для бота и счетчика мемов
-        with patch("kartoshka_bot.load_meme_counter", return_value=0):
+        with patch("kartoshka.storage.load_meme_counter", return_value=0):
             self.scheduler = Scheduler(post_frequency_minutes=60)
     
-    @patch('kartoshka_bot.update_user_messages_with_status', new_callable=AsyncMock)
+    @patch('kartoshka.notifications.update_user_messages_with_status', new_callable=AsyncMock)
     async def test_scheduling(self, mock_update_user):
         """Проверка добавления мема в очередь публикации"""
         # Очищаем существующие посты в планировщике
@@ -310,15 +313,14 @@ class TestPublicationQueue(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(next_time.hour, 7)
             self.assertEqual(next_time.minute, 0)
     
-    @patch("kartoshka_bot.send_media_message", new_callable=AsyncMock)
+    @patch("kartoshka.notifications.send_media_message", new_callable=AsyncMock)
     async def test_publication(self, mock_send_media):
         """Проверка публикации мема"""
-        from kartoshka_bot import publish_meme
-        
-        # Публикуем мем
-        await publish_meme(self.meme)
-        
-        # Проверяем, что вызван метод send_media_message
+        from kartoshka.notifications import publish_meme
+
+        fake_bot = MagicMock()
+        await publish_meme(fake_bot, self.meme, 999)
+
         mock_send_media.assert_called_once()
         
         # Проверяем, что caption передан правильно
@@ -330,12 +332,12 @@ class TestPublicationQueue(unittest.IsolatedAsyncioTestCase):
 class TestEndToEndFlow(unittest.IsolatedAsyncioTestCase):
     """Комплексный тест всего процесса от создания до публикации"""
     
-    @patch("kartoshka_bot.send_media_message", new_callable=AsyncMock)
-    @patch("kartoshka_bot.update_user_messages_with_status", new_callable=AsyncMock)
-    @patch("kartoshka_bot.update_mod_messages_with_resolution", new_callable=AsyncMock)
+    @patch("kartoshka.notifications.send_media_message", new_callable=AsyncMock)
+    @patch("kartoshka.notifications.update_user_messages_with_status", new_callable=AsyncMock)
+    @patch("kartoshka.notifications.update_mod_messages_with_resolution", new_callable=AsyncMock)
     async def test_full_workflow(self, mock_update_mod, mock_update_user, mock_send_media):
         """Проверка полного пути от создания мема до публикации"""
-        from kartoshka_bot import publish_meme
+        from kartoshka.notifications import publish_meme
         
         # 1. Создаем текстовый мем
         message = MagicMock()
@@ -347,7 +349,7 @@ class TestEndToEndFlow(unittest.IsolatedAsyncioTestCase):
         meme.user_messages = [(123, 456)]  # Имитируем отправку сообщения пользователю
         
         # 3. Добавляем голоса модераторов
-        with patch("kartoshka_bot.VOTES_TO_APPROVE", 3), patch("kartoshka_bot.VOTES_TO_REJECT", 3):
+        with patch("kartoshka.config.VOTES_TO_APPROVE", 3), patch("kartoshka.config.VOTES_TO_REJECT", 3):
             # Голосуем за мем
             meme.add_vote(101, "approve")
             # Обновляем виджет пользователя
@@ -365,7 +367,8 @@ class TestEndToEndFlow(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(meme.is_approved())
             
             # 4. Публикуем мем
-            await publish_meme(meme)
+            fake_bot = MagicMock()
+            await publish_meme(fake_bot, meme, 999)
             
             # Проверяем, что вызван метод send_media_message для публикации
             mock_send_media.assert_called_once()

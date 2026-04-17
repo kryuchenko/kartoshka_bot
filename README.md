@@ -1,205 +1,86 @@
-# Kartoshka Bot (Бот-Картошка) 🥔
+# Kartoshka Bot 🥔
 
-[![Tests](https://github.com/kryuchenko/kartoshka_bot/actions/workflows/tests.yml/badge.svg)](https://github.com/kryuchenko/kartoshka_bot/actions/workflows/tests.yml)
-[![Coverage](https://img.shields.io/badge/Coverage-66%25-yellow)](https://github.com/kryuchenko/kartoshka_bot/actions/workflows/tests.yml)
+[![CI](https://github.com/kryuchenko/kartoshka_bot/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/kryuchenko/kartoshka_bot/actions/workflows/tests.yml)
+[![Coverage](https://img.shields.io/badge/Coverage-77%25-yellow)](https://github.com/kryuchenko/kartoshka_bot/actions/workflows/tests.yml)
 
-## О боте
+Telegram-бот для модерации и публикации мемов через голосование редакторов.
 
-Kartoshka Bot — это дружелюбный Telegram-бот для модерации и публикации мемов в вашем чате. Он создан, чтобы сделать процесс публикации мемов простым, безопасным и веселым!
+## Возможности
 
-Бот поддерживает два режима работы:
+- Приём мемов: текст, фото, видео, GIF, voice, video-note.
+- Публикация от своего имени или анонимно («от Анонимной \<Металлической\> Картошки»).
+- Два режима модерации:
+  - **Узурпатор** — один модератор решает.
+  - **Криптоселектархия** — решение большинством голосов.
+- Urgent-публикация: если ≥51% голосов «⚡ Срочно» — мем уходит в канал немедленно, иначе в очередь.
+- Очередь публикации с интервалом, паузой ночью (до 07:00 UTC).
+- Интерактивный виджет статуса голосования — одно сообщение, обновляется в реальном времени.
+- Автобан автора на 14 дней после 3 отклонений подряд.
+- 24h rate-limit на отправку мемов с одного пользователя.
 
-- **Обычный режим (Единоличный Узурпатор)**: решения о публикации мемов принимает единоличный модератор.
-- **Криптоселектархическая олигархия**: решения принимаются коллективно группой тайных модераторов (криптоселектархов), и для публикации или отклонения мема требуется определённое количество голосов.
+## Переменные окружения
 
----
+Создай файл `.env` в корне:
 
-## Основные возможности
-- 📝 Возможность публикации текстовых, фото, видео и GIF-мемов
-- 🎭 Два режима публикации через удобные кнопки:
-  - 👤 От своего имени (с указанием автора)
-  - 🥔 Анонимно (от имени "Картошки")
-- 👥 Система модерации контента:
-  - **Обычный режим**: модерация осуществляется единоличным модератором
-  - **Криптоселектархическая олигархия**: решения принимаются коллективно группой криптоселектархов
-- ⚡ Система срочной публикации:
-  - Криптоселектархи могут использовать кнопку "Срочно" для важных мемов
-  - Если 51% и более от требуемого числа голосов "Срочно" - мем публикуется немедленно
-  - Например: при требуемых 3 голосах нужно минимум 2 срочных (3 × 0.51 ≈ 1.53, округляется вверх до 2)
-  - При недостаточном количестве срочных голосов мем публикуется в общей очереди
-- ✅ Кнопки модерации для редакторов: Одобр. / Срочно / Откл.
-- 📊 Интерактивный виджет голосования с обновляемой статистикой в реальном времени
-- 🏷️ Автоматические подписи для всех типов мемов (текстовых и медиа)
-- ✨ Автоматическое уведомление авторов о статусе их публикаций
-- 📢 Динамическое приветственное сообщение, которое меняется в зависимости от текущего режима бота
+| Переменная | Пример | Описание |
+|---|---|---|
+| `BOT_TOKEN` | `123:ABC...` | Токен от [@BotFather](https://t.me/BotFather) |
+| `EDITOR_IDS` | `1,2,3` | Telegram-ID модераторов, через запятую |
+| `PUBLISH_CHAT_ID` | `-1001234567890` | ID канала для публикации |
+| `BOT_NAME` | `Картошка` | Имя в приветствии |
+| `POST_FREQUENCY_MINUTES` | `180` | Интервал между постами из очереди |
+| `CRYPTOSELECTARCHY` | `true` / `false` | Режим коллективного голосования |
+| `VOTES_TO_APPROVE` | `3` | Голосов «Одобрить» для публикации |
+| `VOTES_TO_REJECT` | `3` | Голосов «Отклонить» для отказа |
 
----
-
-## Как установить и настроить бота
-
-### 1. Развёртывание на сервере
-
-1. **Клонируйте репозиторий**:
-   ```bash
-   git clone git@github.com:kryuchenko/kartoshka_bot.git
-   cd kartoshka_bot
-   ```
-
-2. **Создайте файл `.env`**:
-   - Пример содержимого:
-     ```env
-     BOT_TOKEN=1234567890:ABCdefGHIjklMNOpqrsTUVwxyz
-     EDITOR_IDS=123456789
-     PUBLISH_CHAT_ID=-100123456789
-     BOT_NAME="Картошка Бот"
-     POST_FREQUENCY_MINUTES=180
-     CRYPTOSELECTARCHY=true
-     VOTES_TO_APPROVE=3
-     VOTES_TO_REJECT=3
-     ```
-
-3. **Запустите автоматический скрипт установки**:
-   ```bash
-   sudo ./setup_kartoshka_service.sh
-   ```
-   Скрипт автоматически:
-   - Установит виртуальное окружение (`venv`) и все зависимости из `requirements.txt`.
-   - Настроит `systemd` для автоматического управления ботом.
-   - Запустит и включит бота для автозапуска при старте системы.
-
-4. **Проверьте статус службы**:
-   ```bash
-   sudo systemctl status kartoshka_bot
-   ```
-   Вы должны увидеть, что служба активна.
-
----
-
-### 2. Ручной запуск (для отладки)
-
-1. **Активируйте виртуальное окружение**:
-   ```bash
-   source venv/bin/activate
-   ```
-
-2. **Запустите бота вручную**:
-   ```bash
-   python3 kartoshka_bot.py
-   ```
-
-3. Для остановки нажмите `Ctrl+C`.
-
----
-
-## Управление ботом через systemd
-
-- **Перезапустить бота**:
-  ```bash
-  sudo systemctl restart kartoshka_bot
-  ```
-
-- **Остановить бота**:
-  ```bash
-  sudo systemctl stop kartoshka_bot
-  ```
-
-- **Отключить автозапуск**:
-  ```bash
-  sudo systemctl disable kartoshka_bot
-  ```
-
-### Пример интерактивного виджета
-
-Пользователь видит только одно сообщение, которое обновляется:
-
-```
-Ваш мем отправлен на модерацию.
-[Кнопка]: Голосование: (✅ 2 | ⚡ 1 | ❌ 2)
-```
-
-После принятия решения:
-```
-Ваш мем отправлен на модерацию.
-[Кнопка]: ✅ Одобрен (✅ 3 | ⚡ 0 | ❌ 2) • Публикация: 15:30 UTC
-```
-
----
-
-## Преимущества использования
-
-- 🛡️ Защита чата от нежелательного контента
-- 🎯 Централизованная модерация материалов  
-- 💫 Возможность анонимной публикации
-- 👥 Выбор между единоличной и коллективной модерацией
-- 📊 Прозрачный процесс модерации с интерактивным виджетом
-- 📱 Чистый интерфейс с минимальным количеством сообщений
-- 🏷️ Единое оформление всех типов мемов
-- 🗳️ Настраиваемые пороги для принятия решений
-
----
-
-## Тестирование и разработка
-
-### Тесты
-
-Проект включает комплексную систему тестирования:
-
-> **Примечание**: Общее покрытие кода составляет 66%, а классы DummyMessage и функции сериализации/десериализации покрыты на 100%.
-
-1. **Функциональные тесты**:
-   - `test_caption.py` - тесты для проверки правильности подписей к мемам
-   - `test_user_widget.py` - тесты интерактивного виджета обновления статуса для пользователей
-   
-2. **Комплексные тесты потока данных**:
-   - `test_dataflow.py` - тесты всего жизненного цикла мема от создания до публикации:
-     - Создание мема (текстового/с фото, анонимного/от пользователя)
-     - Процесс модерации (голосование, решения об одобрении/отклонении)
-     - Планирование публикации (очередь, срочная публикация)
-     - Обновление информации для пользователя через интерактивный виджет
-
-3. **Демонстрационные тесты**:
-   - `test_user_widget_simple.py` - демонстрация работы виджета
-   - `test_user_widget_visual.py` - визуальная демонстрация обновлений виджета
-
-### Запуск тестов
-
-Все тесты можно запустить следующими командами:
+## Установка (systemd)
 
 ```bash
-# Функциональные тесты
-python -m pytest test_caption.py -v
-python -m pytest test_user_widget.py -v
-
-# Комплексные тесты жизненного цикла
-python -m pytest test_dataflow.py -v
-
-# Тесты сериализации и DummyMessage (только рабочие тесты)
-python -m pytest test_kartoshka_bot.py -k "test_dummy_message or test_serialize or test_deserialize" -v
-
-# Генерация отчета о покрытии
-# Полный отчет со всеми тестами
-python -m pytest --cov=kartoshka_bot --cov-report=term-missing test_*.py
-
-# Только тесты DummyMessage и сериализации
-python -m pytest --cov=kartoshka_bot.DummyMessage --cov=kartoshka_bot.serialize_message --cov=kartoshka_bot.deserialize_message test_kartoshka_bot.py -k "test_dummy_message or test_serialize or test_deserialize"
+git clone git@github.com:kryuchenko/kartoshka_bot.git
+cd kartoshka_bot
+$EDITOR .env                      # заполнить переменные из таблицы выше
+sudo ./setup_kartoshka_service.sh # venv + systemd, запуск при старте системы
+sudo systemctl status kartoshka_bot
 ```
 
-### Непрерывная интеграция
+Управление:
 
-Проект настроен для использования GitHub Actions для автоматического тестирования при каждом пуше в репозиторий. Файл конфигурации находится в `.github/workflows/tests.yml`.
+```bash
+sudo systemctl restart kartoshka_bot
+sudo systemctl stop kartoshka_bot
+sudo systemctl disable kartoshka_bot
+```
 
-#### Настройка динамического бейджа покрытия кода
+## Разработка
 
-Для отображения динамического бейджа с процентом покрытия кода, необходимо:
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python kartoshka_bot.py            # локальный запуск
+pytest tests/                      # 90 тестов
+```
 
-1. Создать GitHub Gist с любым содержимым
-2. Получить ID Gist (последняя часть URL, например: `bc9c19eda4b6ee92a19d17f4d02ffbea`)
-3. Создать Personal Access Token с разрешением на доступ к gist в [настройках GitHub](https://github.com/settings/tokens)
-4. Добавить секрет `GIST_SECRET` в настройки репозитория (Settings > Secrets and variables > Actions > New repository secret)
-5. Обновить `gistID` в файле `.github/workflows/tests.yml` и ссылку на бейдж в README.md
+## Структура проекта
 
-После настройки, бейдж будет автоматически обновляться при каждом успешном запуске тестов.
+```
+kartoshka_bot.py           entrypoint-shim: asyncio.run(main())
+kartoshka/
+├── main.py                build_app_state() + main()
+├── state.py               AppState (bot, scheduler, meme_counter, user_data, user_publish_choice)
+├── config.py              env-переменные
+├── constants.py           METALS_AND_TOXINS + имена JSON-файлов
+├── models.py              Meme
+├── message_snapshot.py    MessageSnapshot — лёгкий снимок aiogram.Message
+├── storage.py             JSON I/O (meme_counter, user_data)
+├── scheduler.py           Scheduler с DI (bot, on_publish)
+├── telegram_io.py         send_media_message, build_mod_keyboard
+├── notifications.py       publish_meme, update_user/mod_messages_with_status
+└── handlers/
+    ├── start.py           /start + выбор публикации
+    ├── submit.py          приём мема + check_user_limits
+    └── moderation.py      голоса модераторов + финализация
+```
 
----
+## Лицензия
 
-С любовью к мемам и картошке! 🥔✨
+MIT — см. [LICENSE](LICENSE).

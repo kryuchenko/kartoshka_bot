@@ -3,7 +3,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict
 
-from kartoshka.constants import COUNTER_FILE, USER_DATA_FILE
+from kartoshka.constants import CANDIDATES_FILE, COUNTER_FILE, USER_DATA_FILE
 
 
 def load_meme_counter() -> int:
@@ -61,3 +61,45 @@ def save_user_data(data: Dict[str, Dict[str, Any]]):
             json.dump(serialized_data, f, ensure_ascii=False, indent=2)
     except Exception as e:
         logging.error(f"Ошибка при сохранении данных пользователей: {e}")
+
+
+def load_candidates() -> list:
+    """Список кандидатов в криптоселектархи (отклики на рассылку)."""
+    try:
+        with open(CANDIDATES_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
+    except Exception as e:
+        logging.error(f"Ошибка при загрузке кандидатов: {e}")
+        return []
+
+
+def save_candidates(candidates: list) -> None:
+    try:
+        with open(CANDIDATES_FILE, "w", encoding="utf-8") as f:
+            json.dump(candidates, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logging.error(f"Ошибка при сохранении кандидатов: {e}")
+
+
+def add_candidate(user_id: int, username, first_name, ts: str) -> bool:
+    """Добавляет кандидата (идемпотентно). Возвращает True если запись новая.
+
+    Повторный отклик обновляет username/first_name, но сохраняет первый ts.
+    """
+    candidates = load_candidates()
+    for c in candidates:
+        if c["id"] == user_id:
+            c["username"] = username
+            c["first_name"] = first_name
+            save_candidates(candidates)
+            return False
+    candidates.append({
+        "id": user_id,
+        "username": username,
+        "first_name": first_name,
+        "ts": ts,
+    })
+    save_candidates(candidates)
+    return True

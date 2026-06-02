@@ -36,7 +36,12 @@ meme_counter.json
 moderation_queue.json
 publication_queue.json
 user_data.json
+candidates.json
 
 # Dev-утилиты профилирования
 profile_*.py
 memray*.bin
+
+# Бэкапы (в т.ч. .env.bak* с секретами)
+*.bak
+.env.bak*

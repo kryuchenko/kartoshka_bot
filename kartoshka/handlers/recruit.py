@@ -1,8 +1,8 @@
 """Набор криптоселектархов: кнопка-отклик из рассылки.
 
-Пользователь жмёт инлайн-кнопку под рассылочным сообщением → его UID
-попадает в candidates.json. По итогам отбора троих выбирают жребием
-(см. scripts/draw_cryptoselectarchs.py).
+Выборы завершены — кнопка теперь сообщает об этом и ничего не записывает.
+Историческое поведение (запись кандидата в candidates.json) сохранено под
+флагом ELECTIONS_OPEN на случай повторного набора.
 """
 import logging
 from datetime import datetime, timezone
@@ -16,12 +16,21 @@ from kartoshka.storage import add_candidate, load_candidates
 
 JOIN_CALLBACK = "crypto_join"
 
+# Набор закрыт: жребий проведён, новые отклики не принимаются.
+ELECTIONS_OPEN = False
+
 
 def register(dp: Dispatcher, state: AppState) -> None:
     @dp.callback_query(F.data == JOIN_CALLBACK)
     async def crypto_join(callback: CallbackQuery):
-        user = callback.from_user
+        if not ELECTIONS_OPEN:
+            await callback.answer(
+                "🗳 Выборы криптоселектархов завершены. Спасибо за отклик!",
+                show_alert=True,
+            )
+            return
 
+        user = callback.from_user
         if user.id in config.EDITOR_IDS:
             await callback.answer("Ты уже криптоселектарх 🥔", show_alert=True)
             return

@@ -79,6 +79,13 @@ async def _finalize_meme(meme: Meme, action: str, state: AppState) -> None:
 def register(dp: Dispatcher, state: AppState) -> None:
     @dp.callback_query(F.data.startswith(("approve_", "urgent_", "reject_")))
     async def crypto_callback(callback: CallbackQuery):
+        # Кнопки видят только редакторы, но Telegram не гарантирует, что callback_data
+        # пришла именно с их клавиатуры: любой клиент может отправить произвольный
+        # approve_<id>. Поэтому авторизацию проверяем здесь, а не полагаемся на UI.
+        if callback.from_user.id not in config.EDITOR_IDS:
+            await callback.answer("Вы не модератор.", show_alert=True)
+            return
+
         action, meme_id_str = callback.data.split("_", 1)
         meme_id = int(meme_id_str)
         if meme_id not in state.scheduler.pending_memes:

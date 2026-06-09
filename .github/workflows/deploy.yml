@@ -37,17 +37,47 @@ jobs:
         run: ssh deploy-target "touch ~/.hushlogin" || true
 
       - name: Deploy via SSH
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          EDITOR_IDS: ${{ secrets.EDITOR_IDS }}
+          PUBLISH_CHAT_ID: ${{ secrets.PUBLISH_CHAT_ID }}
+          BOT_NAME: ${{ secrets.BOT_NAME }}
+          POST_FREQUENCY_MINUTES: ${{ secrets.POST_FREQUENCY_MINUTES }}
+          CRYPTOSELECTARCHY: ${{ secrets.CRYPTOSELECTARCHY }}
+          VOTES_TO_APPROVE: ${{ secrets.VOTES_TO_APPROVE }}
+          VOTES_TO_REJECT: ${{ secrets.VOTES_TO_REJECT }}
         run: |
-          ssh -q deploy-target << 'EOF'
+          # Собираем .env локально и кодируем в base64: спецсимволы в секретах
+          # (перевод строки, кавычки, $, строка-маркер heredoc) не смогут сломать
+          # парсинг на удалённой стороне и не утекут в текст remote-скрипта.
+          ENV_B64=$(
+            {
+              printf 'BOT_TOKEN=%s\n'              "$BOT_TOKEN"
+              printf 'EDITOR_IDS=%s\n'             "$EDITOR_IDS"
+              printf 'PUBLISH_CHAT_ID=%s\n'        "$PUBLISH_CHAT_ID"
+              printf 'BOT_NAME=%s\n'               "$BOT_NAME"
+              printf 'POST_FREQUENCY_MINUTES=%s\n' "$POST_FREQUENCY_MINUTES"
+              printf 'CRYPTOSELECTARCHY=%s\n'      "$CRYPTOSELECTARCHY"
+              printf 'VOTES_TO_APPROVE=%s\n'       "$VOTES_TO_APPROVE"
+              printf 'VOTES_TO_REJECT=%s\n'        "$VOTES_TO_REJECT"
+            } | base64 | tr -d '\n'
+          )
+
+          ssh -q deploy-target ENV_B64="$ENV_B64" 'bash -s' << 'EOF'
           set -e
           cd ~/projects/kartoshka_bot
 
           # Бэкап runtime state (до этого коммита JSON'ы были tracked, pull мог бы их снести).
+          # .env НЕ бэкапим: он перезаписывается из secrets ниже, а копии с боевым
+          # токеном не должны накапливаться в $HOME.
           BACKUP_DIR=~/kartoshka-backup-$(date +%Y%m%d-%H%M%S)
           mkdir -p "$BACKUP_DIR"
+          chmod 700 "$BACKUP_DIR"
           cp -p *.json "$BACKUP_DIR/" 2>/dev/null || true
-          cp -p .env "$BACKUP_DIR/" 2>/dev/null || true
           echo "✔ State backed up to $BACKUP_DIR"
+
+          # Чистим бэкапы старше 7 дней, чтобы они не копились бесконечно.
+          find ~ -maxdepth 1 -type d -name 'kartoshka-backup-*' -mtime +7 -exec rm -rf {} + 2>/dev/null || true
 
           # Жёсткий reset: отбрасывает локальные изменения в tracked файлах
           # (включая старые tracked JSON'ы), обновляет до origin/main.
@@ -69,17 +99,9 @@ jobs:
           pip install -q -r requirements.txt
           echo "✔ Dependencies installed"
 
-          # Перезаписываем .env из secrets.
-          cat > .env << 'EOT'
-          BOT_TOKEN=${{ secrets.BOT_TOKEN }}
-          EDITOR_IDS=${{ secrets.EDITOR_IDS }}
-          PUBLISH_CHAT_ID=${{ secrets.PUBLISH_CHAT_ID }}
-          BOT_NAME="${{ secrets.BOT_NAME }}"
-          POST_FREQUENCY_MINUTES=${{ secrets.POST_FREQUENCY_MINUTES }}
-          CRYPTOSELECTARCHY=${{ secrets.CRYPTOSELECTARCHY }}
-          VOTES_TO_APPROVE=${{ secrets.VOTES_TO_APPROVE }}
-          VOTES_TO_REJECT=${{ secrets.VOTES_TO_REJECT }}
-          EOT
+          # Перезаписываем .env из secrets (декодируем переданный base64).
+          umask 077
+          printf '%s' "$ENV_B64" | base64 -d > .env
 
           sudo systemctl restart kartoshka_bot.service
 

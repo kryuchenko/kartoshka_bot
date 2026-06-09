@@ -32,4 +32,12 @@ POST_FREQUENCY_MINUTES = int(POST_FREQUENCY_MINUTES_STR)
 CRYPTOSELECTARCHY = CRYPTOSELECTARCHY_STR.lower() == "true"
 VOTES_TO_APPROVE = int(VOTES_TO_APPROVE_STR)
 VOTES_TO_REJECT = int(VOTES_TO_REJECT_STR)
-EDITOR_IDS = [int(x.strip()) for x in EDITOR_IDS_STR.split(",")]
+try:
+    EDITOR_IDS = [int(x.strip()) for x in EDITOR_IDS_STR.split(",") if x.strip()]
+except ValueError as e:
+    raise ValueError(
+        f"EDITOR_IDS должен быть списком целочисленных Telegram-ID через запятую, "
+        f"получено: {EDITOR_IDS_STR!r}"
+    ) from e
+if not EDITOR_IDS:
+    raise ValueError("EDITOR_IDS не содержит ни одного ID")

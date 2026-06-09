@@ -4,6 +4,7 @@
 Историческое поведение (запись кандидата в candidates.json) сохранено под
 флагом ELECTIONS_OPEN на случай повторного набора.
 """
+import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -12,7 +13,7 @@ from aiogram.types import CallbackQuery
 
 from kartoshka import config
 from kartoshka.state import AppState
-from kartoshka.storage import add_candidate, load_candidates
+from kartoshka.storage import add_candidate
 
 JOIN_CALLBACK = "crypto_join"
 
@@ -35,8 +36,10 @@ def register(dp: Dispatcher, state: AppState) -> None:
             await callback.answer("Ты уже криптоселектарх 🥔", show_alert=True)
             return
 
-        already = any(c["id"] == user.id for c in load_candidates())
-        add_candidate(
+        # add_candidate идемпотентен и сам сообщает, новая ли запись —
+        # отдельное чтение списка перед записью не нужно (и было гонкой).
+        is_new = await asyncio.to_thread(
+            add_candidate,
             user.id,
             user.username,
             user.first_name,
@@ -44,7 +47,7 @@ def register(dp: Dispatcher, state: AppState) -> None:
         )
         logging.info(f"Кандидат в криптоселектархи: {user.id} (@{user.username})")
 
-        if already:
+        if not is_new:
             await callback.answer("Ты уже в списке кандидатов 🥔", show_alert=True)
         else:
             await callback.answer(

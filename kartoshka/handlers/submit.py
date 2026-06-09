@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -48,7 +49,7 @@ def register(dp: Dispatcher, state: AppState) -> None:
             return
 
         state.user_data[str(user_id)]["last_submission"] = now
-        save_user_data(state.user_data)
+        await asyncio.to_thread(save_user_data, state.user_data)
 
         state.meme_counter += 1
         real_user_id: Optional[int] = user_id
@@ -62,8 +63,8 @@ def register(dp: Dispatcher, state: AppState) -> None:
             publish_choice=chosen_mode,
             content=snapshot,
         )
-        state.scheduler.add_pending(meme)
-        save_meme_counter(state.meme_counter)
+        await asyncio.to_thread(state.scheduler.add_pending, meme)
+        await asyncio.to_thread(save_meme_counter, state.meme_counter)
 
         keyboard = InlineKeyboardMarkup(inline_keyboard=[
             [

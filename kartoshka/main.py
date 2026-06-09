@@ -53,11 +53,40 @@ async def _expire_publish_choices_loop(state: AppState, interval_sec: float = 60
             logging.error(f"Ошибка в cleanup-loop: {e}")
 
 
+async def _supervise(name: str, factory) -> None:
+    """Держит фоновый цикл живым: упал — логируем traceback и перезапускаем.
+
+    Иначе падение scheduler.run() убило бы публикации молча: бот продолжал бы
+    отвечать, а очередь — стоять.
+    """
+    while True:
+        try:
+            await factory()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logging.exception(f"Фоновый таск {name} упал, перезапуск через 5 с")
+            await asyncio.sleep(5)
+
+
 async def main() -> None:
     state = build_app_state()
     dp = Dispatcher()
     register_handlers(dp, state)
 
-    asyncio.create_task(state.scheduler.run())
-    asyncio.create_task(_expire_publish_choices_loop(state))
-    await dp.start_polling(state.bot)
+    # Ссылки на таски обязаны жить: asyncio держит таски weakref'ами,
+    # и таск без ссылки может быть отменён сборщиком мусора.
+    background = [
+        asyncio.create_task(_supervise("scheduler", state.scheduler.run), name="scheduler"),
+        asyncio.create_task(
+            _supervise("choice-cleanup", lambda: _expire_publish_choices_loop(state)),
+            name="choice-cleanup",
+        ),
+    ]
+    try:
+        # resolve_used_update_types: просим у Telegram только те апдейты,
+        # на которые есть хендлеры (message, callback_query).
+        await dp.start_polling(state.bot, allowed_updates=dp.resolve_used_update_types())
+    finally:
+        for task in background:
+            task.cancel()

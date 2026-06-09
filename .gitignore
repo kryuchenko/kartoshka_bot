@@ -41,6 +41,14 @@ candidates.json
 # Dev-утилиты профилирования
 profile_*.py
 memray*.bin
+scalene-profile.json
+
+# Мутационное тестирование
+.mutmut-cache
+.venv-mut/
+
+# Атомарные записи: недописанные tmp-файлы (остаются только при крэше в момент записи)
+*.json.*.tmp
 
 # Бэкапы (в т.ч. .env.bak* с секретами)
 *.bak

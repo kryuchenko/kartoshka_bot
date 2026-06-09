@@ -9,6 +9,7 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from kartoshka.constants import MODERATION_FILE, PUBLICATION_FILE
 from kartoshka.models import Meme
+from kartoshka.storage import atomic_write_json
 
 PublishCallback = Callable[[Meme], Awaitable[None]]
 
@@ -50,10 +51,11 @@ class Scheduler:
         return dt
 
     def save_moderation(self):
-        data = {"pending_memes": [m.to_dict() for m in self.pending_memes.values()]}
+        # Сериализация тоже внутри try: save может выполняться в worker-треде
+        # (asyncio.to_thread), исключение не должно ронять вызывающий хендлер.
         try:
-            with open(self.MODERATION_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            data = {"pending_memes": [m.to_dict() for m in self.pending_memes.values()]}
+            atomic_write_json(self.MODERATION_FILE, data)
         except Exception as e:
             logging.error(f"Ошибка при сохранении модерационной очереди: {e}")
 
@@ -78,13 +80,12 @@ class Scheduler:
             self.pending_memes = {}
 
     def save_publication(self):
-        data = {
-            "last_published_time": self.last_published_time.isoformat(),
-            "queue": self.scheduled_posts,
-        }
         try:
-            with open(self.PUBLICATION_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            data = {
+                "last_published_time": self.last_published_time.isoformat(),
+                "queue": self.scheduled_posts,
+            }
+            atomic_write_json(self.PUBLICATION_FILE, data)
         except Exception as e:
             logging.error(f"Ошибка при сохранении очереди публикации: {e}")
 
@@ -95,7 +96,16 @@ class Scheduler:
             self.last_published_time = datetime.fromisoformat(
                 data.get("last_published_time", datetime.now(timezone.utc).isoformat())
             )
-            self.scheduled_posts = data.get("queue", [])
+            # Отбрасываем записи с нечитаемым scheduled_time: одна битая запись
+            # не должна валить sort/публикацию всей очереди.
+            valid_posts = []
+            for entry in data.get("queue", []):
+                try:
+                    datetime.fromisoformat(entry["scheduled_time"])
+                    valid_posts.append(entry)
+                except (KeyError, TypeError, ValueError):
+                    logging.error(f"Пропущена запись очереди с битым scheduled_time: {entry!r}")
+            self.scheduled_posts = valid_posts
             for i, entry in enumerate(sorted(self.scheduled_posts, key=lambda x: datetime.fromisoformat(x["scheduled_time"]))):
                 entry_time = datetime.fromisoformat(entry["scheduled_time"])
                 if entry_time < self.last_published_time:
@@ -166,32 +176,39 @@ class Scheduler:
 
     async def run(self):
         while True:
-            now = datetime.now(timezone.utc)
-            expired = []
-            for mem_id, meme in list(self.pending_memes.items()):
-                if now - meme.created_time > timedelta(days=3):
-                    expired.append(mem_id)
-            for mid in expired:
-                del self.pending_memes[mid]
-                self.save_moderation()
+            # Любое неожиданное исключение итерации (битая запись, сбой диска)
+            # не должно убивать цикл публикации: логируем и продолжаем.
+            # CancelledError — BaseException, поэтому отмена таска проходит насквозь.
+            try:
+                now = datetime.now(timezone.utc)
+                expired = []
+                for mem_id, meme in list(self.pending_memes.items()):
+                    if now - meme.created_time > timedelta(days=3):
+                        expired.append(mem_id)
+                for mid in expired:
+                    del self.pending_memes[mid]
+                    self.save_moderation()
 
-            if self.scheduled_posts:
-                self.scheduled_posts.sort(key=lambda x: datetime.fromisoformat(x["scheduled_time"]))
-                next_entry = self.scheduled_posts[0]
-                next_time = datetime.fromisoformat(next_entry["scheduled_time"])
-                if next_time > now:
-                    await asyncio.sleep(min((next_time - now).total_seconds(), 10))
+                if self.scheduled_posts:
+                    self.scheduled_posts.sort(key=lambda x: datetime.fromisoformat(x["scheduled_time"]))
+                    next_entry = self.scheduled_posts[0]
+                    next_time = datetime.fromisoformat(next_entry["scheduled_time"])
+                    if next_time > now:
+                        await asyncio.sleep(min((next_time - now).total_seconds(), 10))
+                    else:
+                        self.scheduled_posts.pop(0)
+                        self.save_publication()
+                        meme_data = next_entry["meme"]
+                        meme = Meme.from_dict(meme_data)
+                        if self.on_publish is not None:
+                            try:
+                                await self.on_publish(meme)
+                            except Exception as e:
+                                logging.error(f"Ошибка в on_publish для мема {meme.meme_id}: {e}")
+                        self.last_published_time = datetime.now(timezone.utc)
+                        self.save_publication()
                 else:
-                    self.scheduled_posts.pop(0)
-                    self.save_publication()
-                    meme_data = next_entry["meme"]
-                    meme = Meme.from_dict(meme_data)
-                    if self.on_publish is not None:
-                        try:
-                            await self.on_publish(meme)
-                        except Exception as e:
-                            logging.error(f"Ошибка в on_publish для мема {meme.meme_id}: {e}")
-                    self.last_published_time = datetime.now(timezone.utc)
-                    self.save_publication()
-            else:
+                    await asyncio.sleep(10)
+            except Exception:
+                logging.exception("Ошибка в цикле планировщика")
                 await asyncio.sleep(10)

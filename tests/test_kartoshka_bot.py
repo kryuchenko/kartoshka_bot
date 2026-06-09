@@ -488,4 +488,7 @@ async def test_main(monkeypatch):
     fake_state.scheduler.run = AsyncMock(return_value=None)
     monkeypatch.setattr(bot, "build_app_state", lambda: fake_state)
     await bot.main()
-    dp_instance.start_polling.assert_called_once_with(fake_state.bot)
+    dp_instance.start_polling.assert_called_once_with(
+        fake_state.bot,
+        allowed_updates=dp_instance.resolve_used_update_types.return_value,
+    )

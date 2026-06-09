@@ -1,9 +1,52 @@
+import fcntl
 import json
 import logging
+import os
+import tempfile
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Dict
 
 from kartoshka.constants import CANDIDATES_FILE, COUNTER_FILE, USER_DATA_FILE
+
+
+def atomic_write_json(path: str, payload) -> None:
+    """Пишет JSON атомарно: tmp-файл в той же директории + os.replace.
+
+    При внезапной смерти процесса (OOM-kill при MemoryMax, рестарт systemd)
+    на диске останется либо старая, либо новая версия файла — но не обрезок,
+    который при следующем старте молча превратился бы в пустое состояние.
+    """
+    dir_ = os.path.dirname(os.path.abspath(path))
+    fd, tmp_path = tempfile.mkstemp(dir=dir_, prefix=os.path.basename(path) + ".", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
+
+@contextmanager
+def _candidates_lock():
+    """Межпроцессная блокировка candidates.json.
+
+    Кандидатов пишет и живой бот (recruit-хендлер), и one-off скрипты
+    (broadcast/жребий) — read-modify-write без лока может потерять отклик.
+    """
+    lock_path = CANDIDATES_FILE + ".lock"
+    with open(lock_path, "w") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
 
 
 def load_meme_counter() -> int:
@@ -19,10 +62,8 @@ def load_meme_counter() -> int:
 
 
 def save_meme_counter(counter: int):
-    data = {"meme_counter": counter}
     try:
-        with open(COUNTER_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        atomic_write_json(COUNTER_FILE, {"meme_counter": counter})
     except Exception as e:
         logging.error(f"Ошибка при сохранении счетчика meme_id: {e}")
 
@@ -57,8 +98,7 @@ def save_user_data(data: Dict[str, Dict[str, Any]]):
                 "ban_until": ud["ban_until"].isoformat() if ud["ban_until"] else None,
             }
 
-        with open(USER_DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(serialized_data, f, ensure_ascii=False, indent=2)
+        atomic_write_json(USER_DATA_FILE, serialized_data)
     except Exception as e:
         logging.error(f"Ошибка при сохранении данных пользователей: {e}")
 
@@ -77,8 +117,7 @@ def load_candidates() -> list:
 
 def save_candidates(candidates: list) -> None:
     try:
-        with open(CANDIDATES_FILE, "w", encoding="utf-8") as f:
-            json.dump(candidates, f, ensure_ascii=False, indent=2)
+        atomic_write_json(CANDIDATES_FILE, candidates)
     except Exception as e:
         logging.error(f"Ошибка при сохранении кандидатов: {e}")
 
@@ -87,19 +126,21 @@ def add_candidate(user_id: int, username, first_name, ts: str) -> bool:
     """Добавляет кандидата (идемпотентно). Возвращает True если запись новая.
 
     Повторный отклик обновляет username/first_name, но сохраняет первый ts.
+    Read-modify-write выполняется под межпроцессным локом.
     """
-    candidates = load_candidates()
-    for c in candidates:
-        if c["id"] == user_id:
-            c["username"] = username
-            c["first_name"] = first_name
-            save_candidates(candidates)
-            return False
-    candidates.append({
-        "id": user_id,
-        "username": username,
-        "first_name": first_name,
-        "ts": ts,
-    })
-    save_candidates(candidates)
-    return True
+    with _candidates_lock():
+        candidates = load_candidates()
+        for c in candidates:
+            if c["id"] == user_id:
+                c["username"] = username
+                c["first_name"] = first_name
+                save_candidates(candidates)
+                return False
+        candidates.append({
+            "id": user_id,
+            "username": username,
+            "first_name": first_name,
+            "ts": ts,
+        })
+        save_candidates(candidates)
+        return True

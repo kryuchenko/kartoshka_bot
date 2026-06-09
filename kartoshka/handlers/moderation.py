@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
@@ -35,7 +36,7 @@ async def _increment_rejections_and_maybe_ban(user_id, state: AppState) -> None:
         ud["ban_until"] = datetime.now(timezone.utc) + timedelta(days=14)
 
     # Сначала коммитим изменения на диск — важнее чем уведомление.
-    save_user_data(state.user_data)
+    await asyncio.to_thread(save_user_data, state.user_data)
 
     # Уведомление пользователя о бане может не пройти (юзер заблокировал бота) — не фейлимся.
     if ud["rejections"] >= 3:
@@ -87,7 +88,11 @@ def register(dp: Dispatcher, state: AppState) -> None:
             return
 
         action, meme_id_str = callback.data.split("_", 1)
-        meme_id = int(meme_id_str)
+        try:
+            meme_id = int(meme_id_str)
+        except ValueError:
+            await callback.answer("Некорректный запрос.")
+            return
         if meme_id not in state.scheduler.pending_memes:
             await callback.answer("Заявка не найдена или уже обработана.")
             return
@@ -95,7 +100,7 @@ def register(dp: Dispatcher, state: AppState) -> None:
         meme = state.scheduler.pending_memes[meme_id]
         crypto_id = callback.from_user.id
         meme.add_vote(crypto_id, action)
-        state.scheduler.save_moderation()
+        await asyncio.to_thread(state.scheduler.save_moderation)
 
         # Атомарно: решаем финализировать и ставим claim ДО любого await.
         # Это защищает от гонки, когда два callback-а одновременно приходят к финализации.
@@ -110,15 +115,24 @@ def register(dp: Dispatcher, state: AppState) -> None:
             if final_action is not None:
                 meme.finalized = True  # ← атомарный claim, до первого await
 
-        await notifications.update_user_messages_with_status(state.bot, meme)
-        await callback.answer("Ваш голос учтен.", show_alert=False)
+        # Косметика (ответ на callback, перерисовка клавиатур) не должна срывать
+        # финализацию: если edit упадёт (сообщение старше 48 ч, «not modified»),
+        # мем с established claim (finalized=True) иначе зависнет навсегда.
+        try:
+            await callback.answer("Ваш голос учтен.", show_alert=False)
+        except Exception as e:
+            logging.error(f"Не удалось ответить на callback по мему {meme.meme_id}: {e}")
 
-        new_kb = build_mod_keyboard(meme, crypto_id)
-        await state.bot.edit_message_reply_markup(
-            chat_id=callback.message.chat.id,
-            message_id=callback.message.message_id,
-            reply_markup=new_kb,
-        )
+        try:
+            await notifications.update_user_messages_with_status(state.bot, meme)
+            new_kb = build_mod_keyboard(meme, crypto_id)
+            await state.bot.edit_message_reply_markup(
+                chat_id=callback.message.chat.id,
+                message_id=callback.message.message_id,
+                reply_markup=new_kb,
+            )
+        except Exception as e:
+            logging.error(f"Не удалось обновить клавиатуры по мему {meme.meme_id}: {e}")
 
         if final_action is not None:
             await _finalize_meme(meme, final_action, state)

@@ -7,16 +7,26 @@ from typing import Awaitable, Callable, Dict, Optional
 from aiogram import Bot
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-from kartoshka.constants import MODERATION_FILE, PUBLICATION_FILE
+from kartoshka.constants import (
+    FAILED_PUBLICATIONS_FILE,
+    MODERATION_FILE,
+    PUBLICATION_FILE,
+)
 from kartoshka.models import Meme
 from kartoshka.storage import atomic_write_json
 
-PublishCallback = Callable[[Meme], Awaitable[None]]
+# on_publish сообщает об успехе булевым результатом: falsy (или исключение)
+# означает неудачу публикации, после которой scheduler ретраит мем.
+PublishCallback = Callable[[Meme], Awaitable[bool]]
+
+# Сколько раз пытаемся опубликовать мем, прежде чем отправить его в dead-letter.
+MAX_PUBLISH_ATTEMPTS = 3
 
 
 class Scheduler:
     MODERATION_FILE = MODERATION_FILE
     PUBLICATION_FILE = PUBLICATION_FILE
+    FAILED_PUBLICATIONS_FILE = FAILED_PUBLICATIONS_FILE
 
     def __init__(
         self,
@@ -174,6 +184,76 @@ class Scheduler:
                 except Exception as e:
                     logging.error(f"Не удалось уведомить пользователя {meme.user_id} о планировании: {e}")
 
+    async def _publish_due_entry(self, entry: dict, now: datetime) -> None:
+        """Публикует созревшую запись, не выталкивая её до подтверждения успеха.
+
+        Успех (on_publish вернул truthy) → запись удаляется из очереди,
+        last_published_time обновляется. Неудача (falsy, исключение или битая
+        запись, которую не удаётся десериализовать) → попытка фиксируется в
+        entry["attempts"]: первые MAX_PUBLISH_ATTEMPTS неудач откладывают запись
+        с линейным бэкоффом (5 мин × номер попытки), дальше она уходит в dead-letter.
+        """
+        try:
+            meme = Meme.from_dict(entry["meme"])
+            if self.on_publish is None:
+                success = True  # некому публиковать — просто снимаем запись с очереди
+            else:
+                success = bool(await self.on_publish(meme))
+        except Exception as e:
+            # Сюда попадают и сбои on_publish, и битые записи (Meme.from_dict).
+            # Битую запись тоже считаем неудачной попыткой — иначе цикл вечно
+            # жевал бы её, не двигаясь дальше по очереди.
+            meme_id = entry.get("meme", {}).get("meme_id", "?")
+            logging.error(f"Ошибка в on_publish для мема {meme_id}: {e}")
+            success = False
+
+        if success:
+            self.scheduled_posts.pop(0)
+            self.last_published_time = datetime.now(timezone.utc)
+            self.save_publication()
+            return
+
+        self._handle_failed_publication(entry, now)
+
+    def _handle_failed_publication(self, entry: dict, now: datetime) -> None:
+        attempts = entry.get("attempts", 0) + 1
+        entry["attempts"] = attempts
+        meme_id = entry.get("meme", {}).get("meme_id", "?")
+
+        if attempts <= MAX_PUBLISH_ATTEMPTS:
+            backoff = now + timedelta(minutes=5 * attempts)
+            entry["scheduled_time"] = backoff.isoformat()
+            self.save_publication()
+            logging.warning(
+                f"Публикация мема {meme_id} не удалась (попытка {attempts}/"
+                f"{MAX_PUBLISH_ATTEMPTS}), повтор в {backoff.isoformat()}"
+            )
+            return
+
+        # Исчерпали попытки: снимаем запись с очереди и громко роняем в dead-letter.
+        self.scheduled_posts.pop(0)
+        self._append_failed_publication(entry)
+        self.save_publication()
+        logging.error(
+            f"Мем {meme_id} ушёл в dead-letter после {attempts - 1} неудачных "
+            f"попыток публикации: {self.FAILED_PUBLICATIONS_FILE}"
+        )
+
+    def _append_failed_publication(self, entry: dict) -> None:
+        """Дописывает запись в dead-letter файл (append к существующему списку)."""
+        try:
+            try:
+                with open(self.FAILED_PUBLICATIONS_FILE, "r", encoding="utf-8") as f:
+                    failed = json.load(f)
+                if not isinstance(failed, list):
+                    failed = []
+            except (FileNotFoundError, json.JSONDecodeError):
+                failed = []
+            failed.append(entry)
+            atomic_write_json(self.FAILED_PUBLICATIONS_FILE, failed)
+        except Exception as e:
+            logging.error(f"Не удалось записать мем в dead-letter: {e}")
+
     async def run(self):
         while True:
             # Любое неожиданное исключение итерации (битая запись, сбой диска)
@@ -196,17 +276,11 @@ class Scheduler:
                     if next_time > now:
                         await asyncio.sleep(min((next_time - now).total_seconds(), 10))
                     else:
-                        self.scheduled_posts.pop(0)
-                        self.save_publication()
-                        meme_data = next_entry["meme"]
-                        meme = Meme.from_dict(meme_data)
-                        if self.on_publish is not None:
-                            try:
-                                await self.on_publish(meme)
-                            except Exception as e:
-                                logging.error(f"Ошибка в on_publish для мема {meme.meme_id}: {e}")
-                        self.last_published_time = datetime.now(timezone.utc)
-                        self.save_publication()
+                        # publish-then-pop: запись остаётся в очереди, пока публикация
+                        # не подтверждена. Семантика стала at-least-once — крэш между
+                        # успешной публикацией и pop() даст дубль поста после рестарта,
+                        # но для мем-канала дубль предпочтительнее тихой потери мема.
+                        await self._publish_due_entry(next_entry, now)
                 else:
                     await asyncio.sleep(10)
             except Exception:

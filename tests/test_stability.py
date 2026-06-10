@@ -178,7 +178,12 @@ def test_load_publication_skips_corrupt_entries(tmp_path, monkeypatch, caplog):
 
 @pytest.mark.asyncio
 async def test_scheduler_run_survives_iteration_error(tmp_path, monkeypatch, caplog):
-    """Битая запись в очереди (Meme.from_dict падает) не убивает цикл."""
+    """Битая запись (Meme.from_dict падает) не убивает цикл и уходит в бэкофф.
+
+    Раньше KeyError ловился внешним try/except цикла; теперь битая запись —
+    такая же неудачная попытка публикации: логируется как ошибка on_publish,
+    запись остаётся в очереди со сдвинутым scheduled_time (не зацикливается).
+    """
     s = _isolated_scheduler(tmp_path, monkeypatch)
     s.scheduled_posts = [{
         "scheduled_time": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
@@ -191,7 +196,215 @@ async def test_scheduler_run_survives_iteration_error(tmp_path, monkeypatch, cap
         task.cancel()
         with suppress(asyncio.CancelledError):
             await task
+    assert "Ошибка в on_publish" in caplog.text
+    # битая запись не выброшена сразу: первая неудача → бэкофф, attempts=1
+    assert len(s.scheduled_posts) == 1
+    assert s.scheduled_posts[0]["attempts"] == 1
+
+
+# ===== scheduler: publish-then-pop, retry/backoff, dead-letter =====
+
+def _due_entry(meme_id=1, scheduled_minutes_ago=1, **extra):
+    """Запись очереди с валидным мемом, созревшая для публикации."""
+    from kartoshka.message_snapshot import MessageSnapshot
+    from kartoshka.models import Meme
+
+    snap = MessageSnapshot(content_type="text", text=f"meme {meme_id}")
+    meme = Meme(meme_id=meme_id, user_id=None, publish_choice="potato", content=snap)
+    entry = {
+        "scheduled_time": (
+            datetime.now(timezone.utc) - timedelta(minutes=scheduled_minutes_ago)
+        ).isoformat(),
+        "meme": meme.to_publication_dict(),
+    }
+    entry.update(extra)
+    return entry
+
+
+@pytest.mark.asyncio
+async def test_publish_success_pops_and_updates_time(tmp_path, monkeypatch):
+    """on_publish вернул True → запись выталкивается, last_published_time обновлён."""
+    published = []
+
+    async def ok_publish(meme):
+        published.append(meme.meme_id)
+        return True
+
+    s = _isolated_scheduler(tmp_path, monkeypatch, on_publish=ok_publish)
+    entry = _due_entry(meme_id=42)
+    s.scheduled_posts = [entry]
+    before = s.last_published_time
+
+    await s._publish_due_entry(entry, datetime.now(timezone.utc))
+
+    assert published == [42]
+    assert s.scheduled_posts == []
+    assert s.last_published_time > before
+
+
+@pytest.mark.asyncio
+async def test_publish_false_keeps_entry_and_backs_off(tmp_path, monkeypatch):
+    """on_publish вернул False → запись осталась, attempts=1, scheduled_time +5 мин."""
+    async def bad_publish(meme):
+        return False
+
+    s = _isolated_scheduler(tmp_path, monkeypatch, on_publish=bad_publish)
+    entry = _due_entry()
+    s.scheduled_posts = [entry]
+    now = datetime.now(timezone.utc)
+
+    await s._publish_due_entry(entry, now)
+
+    assert len(s.scheduled_posts) == 1
+    assert entry["attempts"] == 1
+    new_time = datetime.fromisoformat(entry["scheduled_time"])
+    assert abs((new_time - (now + timedelta(minutes=5))).total_seconds()) < 1
+
+
+@pytest.mark.asyncio
+async def test_publish_exception_keeps_entry_and_backs_off(tmp_path, monkeypatch, caplog):
+    """on_publish бросил → то же поведение, что и при False: бэкофф, attempts=1."""
+    async def raising_publish(meme):
+        raise RuntimeError("telegram down")
+
+    s = _isolated_scheduler(tmp_path, monkeypatch, on_publish=raising_publish)
+    entry = _due_entry(meme_id=7)
+    s.scheduled_posts = [entry]
+    now = datetime.now(timezone.utc)
+
+    with caplog.at_level(logging.ERROR):
+        await s._publish_due_entry(entry, now)
+
+    assert "Ошибка в on_publish для мема 7" in caplog.text
+    assert len(s.scheduled_posts) == 1
+    assert entry["attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_publish_fourth_failure_goes_to_dead_letter(tmp_path, monkeypatch, caplog):
+    """attempts > 3 → запись уходит из очереди в dead-letter, error с meme_id."""
+    async def bad_publish(meme):
+        return False
+
+    s = _isolated_scheduler(tmp_path, monkeypatch, on_publish=bad_publish)
+    # запись уже пережила 3 попытки; эта, четвёртая, добивает её
+    entry = _due_entry(meme_id=99, attempts=3)
+    s.scheduled_posts = [entry]
+
+    with caplog.at_level(logging.ERROR):
+        await s._publish_due_entry(entry, datetime.now(timezone.utc))
+
+    assert s.scheduled_posts == []  # выброшена из очереди
+    assert "Мем 99 ушёл в dead-letter" in caplog.text
+
+    with open(Scheduler.FAILED_PUBLICATIONS_FILE, encoding="utf-8") as f:
+        failed = json.load(f)
+    assert [e["meme"]["meme_id"] for e in failed] == [99]
+
+    # очередь сохранена пустой
+    with open(Scheduler.PUBLICATION_FILE, encoding="utf-8") as f:
+        assert json.load(f)["queue"] == []
+
+
+@pytest.mark.asyncio
+async def test_corrupt_entry_eventually_dead_letters(tmp_path, monkeypatch, caplog):
+    """Битая запись (Meme.from_dict падает) не зацикливается: уходит в dead-letter."""
+    async def ok_publish(meme):  # не должен вызваться — from_dict упадёт раньше
+        return True
+
+    s = _isolated_scheduler(tmp_path, monkeypatch, on_publish=ok_publish)
+    entry = {
+        "scheduled_time": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        "meme": {"meme_id": 5},  # нет content/publish_choice → KeyError в from_dict
+        "attempts": 3,
+    }
+    s.scheduled_posts = [entry]
+
+    with caplog.at_level(logging.ERROR):
+        await s._publish_due_entry(entry, datetime.now(timezone.utc))
+
+    assert s.scheduled_posts == []
+    with open(Scheduler.FAILED_PUBLICATIONS_FILE, encoding="utf-8") as f:
+        failed = json.load(f)
+    assert [e["meme"]["meme_id"] for e in failed] == [5]
+
+
+def test_dead_letter_appends_to_existing_file(tmp_path, monkeypatch):
+    """Существующий failed_publications.json с записью + новая → обе в файле."""
+    s = _isolated_scheduler(tmp_path, monkeypatch)
+    existing = _due_entry(meme_id=1)
+    with open(Scheduler.FAILED_PUBLICATIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump([existing], f)
+
+    s._append_failed_publication(_due_entry(meme_id=2))
+
+    with open(Scheduler.FAILED_PUBLICATIONS_FILE, encoding="utf-8") as f:
+        failed = json.load(f)
+    assert [e["meme"]["meme_id"] for e in failed] == [1, 2]
+
+
+def test_dead_letter_recovers_from_corrupt_file(tmp_path, monkeypatch):
+    """Битый dead-letter файл не теряет новую запись: список начинается заново."""
+    s = _isolated_scheduler(tmp_path, monkeypatch)
+    with open(Scheduler.FAILED_PUBLICATIONS_FILE, "w", encoding="utf-8") as f:
+        f.write("{not json")
+
+    s._append_failed_publication(_due_entry(meme_id=3))
+
+    with open(Scheduler.FAILED_PUBLICATIONS_FILE, encoding="utf-8") as f:
+        failed = json.load(f)
+    assert [e["meme"]["meme_id"] for e in failed] == [3]
+
+
+def test_dead_letter_ignores_non_list_file(tmp_path, monkeypatch):
+    """Если dead-letter файл содержит не-список — он перезаписывается списком."""
+    s = _isolated_scheduler(tmp_path, monkeypatch)
+    with open(Scheduler.FAILED_PUBLICATIONS_FILE, "w", encoding="utf-8") as f:
+        json.dump({"unexpected": "object"}, f)
+
+    s._append_failed_publication(_due_entry(meme_id=8))
+
+    with open(Scheduler.FAILED_PUBLICATIONS_FILE, encoding="utf-8") as f:
+        failed = json.load(f)
+    assert [e["meme"]["meme_id"] for e in failed] == [8]
+
+
+@pytest.mark.asyncio
+async def test_scheduler_run_survives_sort_error(tmp_path, monkeypatch, caplog):
+    """Сбой внутри итерации (битый scheduled_time при sort) ловится внешним try."""
+    s = _isolated_scheduler(tmp_path, monkeypatch)
+    s.scheduled_posts = [{"scheduled_time": "не-дата", "meme": {"meme_id": 1}}]
+    with caplog.at_level(logging.ERROR):
+        task = asyncio.create_task(s.run())
+        await asyncio.sleep(0.05)
+        assert not task.done()
+        task.cancel()
+        with suppress(asyncio.CancelledError):
+            await task
     assert "Ошибка в цикле планировщика" in caplog.text
+
+
+def test_dead_letter_write_failure_is_logged(tmp_path, monkeypatch, caplog):
+    """Сбой записи dead-letter не валит вызывающий код, только логируется."""
+    monkeypatch.setattr(
+        Scheduler, "FAILED_PUBLICATIONS_FILE", "/nonexistent_dir_xyz/failed.json"
+    )
+    s = Scheduler(post_frequency_minutes=1)
+    with caplog.at_level(logging.ERROR):
+        s._append_failed_publication(_due_entry(meme_id=4))
+    assert "Не удалось записать мем в dead-letter" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_publish_none_callback_drops_entry(tmp_path, monkeypatch):
+    """on_publish=None → публиковать нечем, запись считается успешно снятой."""
+    s = _isolated_scheduler(tmp_path, monkeypatch, on_publish=None)
+    entry = _due_entry()
+    s.scheduled_posts = [entry]
+
+    await s._publish_due_entry(entry, datetime.now(timezone.utc))
+
+    assert s.scheduled_posts == []
 
 
 # ===== main: супервизор фоновых тасков =====

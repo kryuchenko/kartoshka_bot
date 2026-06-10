@@ -3,6 +3,7 @@ USER_DATA_FILE = "user_data.json"
 MODERATION_FILE = "moderation_queue.json"
 PUBLICATION_FILE = "publication_queue.json"
 CANDIDATES_FILE = "candidates.json"
+FAILED_PUBLICATIONS_FILE = "failed_publications.json"
 
 METALS_AND_TOXINS = [
     "Алюминиевой", "Железной", "Медной", "Свинцовой", "Цинковой", "Титановой", "Никелевой",

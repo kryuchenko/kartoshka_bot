@@ -380,6 +380,7 @@ async def test_scheduler_run_publishes_due(scheduler):
     called = []
     async def fake_publish(meme):
         called.append(meme.meme_id)
+        return True
     scheduler.on_publish = fake_publish
 
     past = datetime.now(timezone.utc) - timedelta(seconds=1)

@@ -47,7 +47,12 @@ def isolate_json_storage(tmp_path, monkeypatch):
     # storage.py импортирует имена на уровне модуля
     monkeypatch.setattr("kartoshka.storage.COUNTER_FILE", counter)
     monkeypatch.setattr("kartoshka.storage.USER_DATA_FILE", user_data)
+    monkeypatch.setattr("kartoshka.storage.CANDIDATES_FILE", str(tmp_path / "candidates.json"))
 
     # Scheduler использует class attrs
     monkeypatch.setattr("kartoshka.scheduler.Scheduler.MODERATION_FILE", moderation)
     monkeypatch.setattr("kartoshka.scheduler.Scheduler.PUBLICATION_FILE", publication)
+    monkeypatch.setattr(
+        "kartoshka.scheduler.Scheduler.FAILED_PUBLICATIONS_FILE",
+        str(tmp_path / "failed_publications.json"),
+    )

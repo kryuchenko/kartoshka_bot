@@ -28,7 +28,9 @@ def build_app_state() -> AppState:
     bot = Bot(token=API_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 
     async def on_publish(meme):
-        await publish_meme(bot, meme, PUBLISH_CHAT_ID)
+        # Возвращаем результат: scheduler ретраит мем, если публикация
+        # не удалась (publish_meme при ошибке Telegram возвращает False).
+        return await publish_meme(bot, meme, PUBLISH_CHAT_ID)
 
     scheduler = Scheduler(POST_FREQUENCY_MINUTES, bot=bot, on_publish=on_publish)
 
